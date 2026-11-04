@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.vscode/
+
+# Run outputs, generated simulator URDF copies, videos, reports
+outputs/
+
+# Weights are downloaded (scripts/download_checkpoints.py); keep the license/readme
+skills/checkpoints/*
+!skills/checkpoints/README.md
+
+# PPO training runs
+training/ppo/runs/
+training/ppo/wandb/
+
+# colcon artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+log/

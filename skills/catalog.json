@@ -1,0 +1,442 @@
+{
+  "version": 1,
+  "description": "移动 Panda 技能库目录。local_skills 是可以下载并在本机运行的技能；external_skills 见 skills/EXTERNAL_SKILLS.md。",
+  "local_skills": [
+    {
+      "id": "classical_pick",
+      "name": "从上方抓起物体",
+      "kind": "classical",
+      "download": false,
+      "robot": "mobile_panda_wheels / mobile_panda_planar",
+      "runs_in": "MobilePandaKitchen-v1",
+      "control_mode": "pd_joint_delta_pos",
+      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "ManipulationSkills(env).pick(name)",
+      "demo": "scripts/demo_manipulation.py",
+      "observation": "仿真真值（物体网格与位姿、把手位置、关节轴），不经过视觉",
+      "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
+      "validated": {
+        "results": {
+          "entry_console sugar_box/pear/lemon": "6/6"
+        },
+        "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
+        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+      },
+      "docs": "docs/manipulation.md"
+    },
+    {
+      "id": "classical_place",
+      "name": "把手中物体放到指定台面位置",
+      "kind": "classical",
+      "download": false,
+      "robot": "mobile_panda_wheels / mobile_panda_planar",
+      "runs_in": "MobilePandaKitchen-v1",
+      "control_mode": "pd_joint_delta_pos",
+      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "ManipulationSkills(env).place((x, y), height=None)",
+      "demo": "scripts/demo_manipulation.py",
+      "observation": "仿真真值（物体网格与位姿、把手位置、关节轴），不经过视觉",
+      "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
+      "validated": {
+        "results": {
+          "entry_console": "6/6, error 0.1-2.3 cm"
+        },
+        "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
+        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+      },
+      "docs": "docs/manipulation.md"
+    },
+    {
+      "id": "classical_open",
+      "name": "抓把手拉开抽屉 / 打开柜门",
+      "kind": "classical",
+      "download": false,
+      "robot": "mobile_panda_wheels / mobile_panda_planar",
+      "runs_in": "MobilePandaKitchen-v1",
+      "control_mode": "pd_joint_delta_pos",
+      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "ManipulationSkills(env).open(articulation, joint, target=None)",
+      "demo": "scripts/demo_manipulation.py",
+      "observation": "仿真真值（物体网格与位姿、把手位置、关节轴），不经过视觉",
+      "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
+      "validated": {
+        "results": {
+          "kitchen_counter middle_slide_top": "5/5",
+          "kitchen_counter left_slide_top": "5/5",
+          "fridge top_door_hinge to 0.6 rad": "5/5"
+        },
+        "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
+        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+      },
+      "docs": "docs/manipulation.md"
+    },
+    {
+      "id": "classical_close",
+      "name": "抓把手关上抽屉 / 柜门",
+      "kind": "classical",
+      "download": false,
+      "robot": "mobile_panda_wheels / mobile_panda_planar",
+      "runs_in": "MobilePandaKitchen-v1",
+      "control_mode": "pd_joint_delta_pos",
+      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "ManipulationSkills(env).close(articulation, joint)",
+      "demo": "scripts/demo_manipulation.py",
+      "observation": "仿真真值（物体网格与位姿、把手位置、关节轴），不经过视觉",
+      "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
+      "validated": {
+        "results": {
+          "kitchen_counter middle_slide_top": "5/5",
+          "kitchen_counter left_slide_top": "5/5",
+          "fridge top_door_hinge from 0.6 rad": "4/5"
+        },
+        "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
+        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+      },
+      "docs": "docs/manipulation.md"
+    },
+    {
+      "id": "mobile_pick_cube",
+      "name": "移动底盘上的方块抓取",
+      "source_task": "PickCube-v1",
+      "download": true,
+      "robot": "mobile_panda_wheels / mobile_panda_planar",
+      "kind": "ppo_adapted",
+      "runs_in": "mobile_scene",
+      "control_mode": "pd_joint_delta_pos",
+      "action": "arm(7)+gripper(1)，底盘保持静止",
+      "checkpoint": "skills/checkpoints/maniskill/PickCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "code": "mobile_panda_sim/skills/pick_cube.py",
+      "demo": "scripts/demo_mobile_pick.py",
+      "observation": "42 维 PickCube state 观测，由适配器从移动场景的真值位姿换算到训练坐标系",
+      "preconditions": "底盘停稳；方块在机械臂坐标系 x=0.615±0.08 m、y=±0.10 m 范围内并放在桌面上",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "results": {
+          "wheels/red_cube": "5/5",
+          "wheels/blue_cube": "5/5",
+          "planar/red_cube": "5/5",
+          "planar/blue_cube": "5/5"
+        },
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "停稳后抓起并到达举升目标点（PickCube 判据：距目标 ≤2.5 cm），之后持续夹持 1 s 不掉落，抓取过程中底盘漂移 <2 cm",
+        "note": "蓝块初始朝向固定 yaw=0，各 seed 的蓝块场景相同；红块朝向随 seed 变化"
+      }
+    },
+    {
+      "id": "PickCube-v1",
+      "name": "抓取方块并举到目标点",
+      "source_task": "PickCube-v1",
+      "download": true,
+      "robot": "panda",
+      "kind": "ppo",
+      "category": "pick",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/PickCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 42,
+      "act_dim": 8
+    },
+    {
+      "id": "PushCube-v1",
+      "name": "把方块推到目标区域",
+      "source_task": "PushCube-v1",
+      "download": true,
+      "robot": "panda",
+      "kind": "ppo",
+      "category": "push",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/PushCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 35,
+      "act_dim": 8
+    },
+    {
+      "id": "PullCube-v1",
+      "name": "把方块拉回到目标区域",
+      "source_task": "PullCube-v1",
+      "download": true,
+      "robot": "panda",
+      "kind": "ppo",
+      "category": "pull",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/PullCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 35,
+      "act_dim": 8
+    },
+    {
+      "id": "PokeCube-v1",
+      "name": "用杆把方块戳到目标位置",
+      "source_task": "PokeCube-v1",
+      "download": true,
+      "robot": "panda",
+      "kind": "ppo",
+      "category": "tool_push",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/PokeCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 54,
+      "act_dim": 8
+    },
+    {
+      "id": "PushT-v1",
+      "name": "把 T 形块推到目标位姿（末端是杆）",
+      "source_task": "PushT-v1",
+      "download": true,
+      "robot": "panda_stick",
+      "kind": "ppo",
+      "category": "push",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/PushT-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 31,
+      "act_dim": 7
+    },
+    {
+      "id": "RollBall-v1",
+      "name": "把球推滚到目标区域",
+      "source_task": "RollBall-v1",
+      "download": true,
+      "robot": "panda",
+      "kind": "ppo",
+      "category": "push",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/RollBall-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "2/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": [
+          0
+        ]
+      },
+      "obs_dim": 44,
+      "act_dim": 8
+    },
+    {
+      "id": "LiftPegUpright-v1",
+      "name": "把躺倒的长杆扶正",
+      "source_task": "LiftPegUpright-v1",
+      "download": true,
+      "robot": "panda",
+      "kind": "ppo",
+      "category": "reorient",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/LiftPegUpright-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 32,
+      "act_dim": 8
+    },
+    {
+      "id": "StackCube-v1",
+      "name": "把红块叠到绿块上",
+      "source_task": "StackCube-v1",
+      "download": true,
+      "robot": "panda",
+      "kind": "ppo",
+      "category": "stack",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/StackCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 48,
+      "act_dim": 8
+    },
+    {
+      "id": "TwoRobotPickCube-v1",
+      "name": "双臂协作抓取方块并举到目标点",
+      "source_task": "TwoRobotPickCube-v1",
+      "download": true,
+      "robot": "panda x2",
+      "kind": "ppo",
+      "category": "bimanual",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/TwoRobotPickCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 66,
+      "act_dim": 16
+    },
+    {
+      "id": "TwoRobotStackCube-v1",
+      "name": "双臂协作堆叠方块",
+      "source_task": "TwoRobotStackCube-v1",
+      "download": true,
+      "robot": "panda x2",
+      "kind": "ppo",
+      "category": "bimanual",
+      "runs_in": "native_task",
+      "control_mode": "pd_joint_delta_pos",
+      "checkpoint": "skills/checkpoints/maniskill/TwoRobotStackCube-v1/rl/ppo_pd_joint_delta_pos_ckpt.pt",
+      "observation": "原任务的 state 观测（物体真值位姿）",
+      "validated": {
+        "seeds": [
+          0,
+          1,
+          2
+        ],
+        "successes": "3/3",
+        "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
+        "criterion": "原任务 info['success']",
+        "failed_seeds": []
+      },
+      "obs_dim": 76,
+      "act_dim": 16
+    },
+    {
+      "id": "PegInsertionSide-v1",
+      "name": "侧向销钉插孔",
+      "source_task": "PegInsertionSide-v1",
+      "download": false,
+      "robot": "panda",
+      "kind": "demonstrations_only",
+      "runs_in": "native_task",
+      "note": "只有运动规划示范轨迹，没有策略网络；可作为模仿学习数据",
+      "fetch": "python scripts/download_checkpoints.py PegInsertionSide-v1 --with-demos",
+      "validated": "未在本仓库运行（无策略，只有示范轨迹）"
+    },
+    {
+      "id": "PlugCharger-v1",
+      "name": "把充电器插头插入插座",
+      "source_task": "PlugCharger-v1",
+      "download": false,
+      "robot": "panda",
+      "kind": "demonstrations_only",
+      "runs_in": "native_task",
+      "note": "只有运动规划示范轨迹，没有策略网络；可作为模仿学习数据",
+      "fetch": "python scripts/download_checkpoints.py PlugCharger-v1 --with-demos",
+      "validated": "未在本仓库运行（无策略，只有示范轨迹）"
+    },
+    {
+      "id": "PullCubeTool-v1",
+      "name": "用 L 形工具把远处方块勾回",
+      "source_task": "PullCubeTool-v1",
+      "download": false,
+      "robot": "panda",
+      "kind": "demonstrations_only",
+      "runs_in": "native_task",
+      "note": "只有运动规划示范轨迹，没有策略网络；可作为模仿学习数据",
+      "fetch": "python scripts/download_checkpoints.py PullCubeTool-v1 --with-demos",
+      "validated": "未在本仓库运行（无策略，只有示范轨迹）"
+    }
+  ],
+  "checkpoint_license": "ManiSkill 官方权重和示范数据来自 Hugging Face 数据集 haosulab/ManiSkill_Demonstrations，许可证 Apache-2.0",
+  "not_included": [
+    {
+      "task": "DrawTriangle-v1 / StackPyramid-v1",
+      "reason": "平台固定的 ManiSkill mshab 分支（3.0.0b18）里没有这两个任务"
+    },
+    {
+      "task": "AnymalC-Reach-v1",
+      "reason": "四足机器人任务，不是机械臂技能"
+    }
+  ],
+  "external_skills": "见 skills/EXTERNAL_SKILLS.md 与 skills/external_skills.json"
+}
