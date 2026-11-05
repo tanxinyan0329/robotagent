@@ -19,25 +19,29 @@ from tf2_ros import TransformBroadcaster
 
 NS = "/mobile_panda"
 CAMERAS = ("base_camera", "hand_camera")
-DEFAULT_PYTHON = str(Path.home() / "anaconda3/envs/mshab/bin/python")
+DEFAULT_PYTHON = {"maniskill": str(Path.home() / "anaconda3/envs/mshab/bin/python"),
+                  "mujoco": str(Path.home() / "anaconda3/envs/llm/bin/python")}
 
 
 class Bridge(Node):
     def __init__(self):
         super().__init__("mobile_panda_bridge")
         defaults = {"project_root": os.environ.get("MOBILE_PANDA_ROOT", str(Path.cwd())),
-                    "sim_python": os.environ.get("MOBILE_PANDA_SIM_PYTHON", DEFAULT_PYTHON),
+                    "sim_python": os.environ.get("MOBILE_PANDA_SIM_PYTHON", ""), "backend": "maniskill",
                     "scene": "kitchen", "base": "wheels", "seed": 0, "viewer": True,
                     "start_x": float("nan"), "start_y": float("nan"), "start_yaw": float("nan")}
         for name, value in defaults.items():
             self.declare_parameter(name, value)
         param = lambda name: self.get_parameter(name).value
         root = Path(param("project_root")).expanduser().resolve()
-        python = Path(param("sim_python")).expanduser()
+        backend = param("backend")
+        if backend not in DEFAULT_PYTHON:
+            raise RuntimeError(f"backend={backend} must be one of {sorted(DEFAULT_PYTHON)}")
+        python = Path(param("sim_python") or DEFAULT_PYTHON[backend]).expanduser()
         if not (root / "mobile_panda_sim/ros2/worker.py").is_file():
             raise RuntimeError(f"project_root={root} is not the repository root (mobile_panda_sim/ missing)")
         if not python.is_file():
-            raise RuntimeError(f"sim_python={python} not found; set it to the Conda interpreter with ManiSkill")
+            raise RuntimeError(f"sim_python={python} not found; set it to the interpreter with the {backend} packages")
 
         sticky = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.state_pub = self.create_publisher(String, f"{NS}/state", sticky)
@@ -62,7 +66,7 @@ class Bridge(Node):
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env["PYTHONPATH"] = str(root)
-        args = [str(python), "-u", "-m", "mobile_panda_sim.ros2.worker", "--scene", param("scene"),
+        args = [str(python), "-u", "-m", "mobile_panda_sim.ros2.worker", "--backend", backend, "--scene", param("scene"),
                 "--base", param("base"), "--seed", str(param("seed"))]
         start = [param("start_x"), param("start_y"), param("start_yaw")]
         if not any(v != v for v in start):

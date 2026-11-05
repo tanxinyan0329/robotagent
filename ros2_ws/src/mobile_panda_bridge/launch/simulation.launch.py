@@ -12,12 +12,13 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 ARGS = {
     "project_root": (os.environ.get("MOBILE_PANDA_ROOT", os.getcwd()), str, "repository root (contains mobile_panda_sim/)"),
-    "sim_python": (os.environ.get("MOBILE_PANDA_SIM_PYTHON", str(Path.home() / "anaconda3/envs/mshab/bin/python")),
-                   str, "Conda interpreter with ManiSkill"),
+    "backend": ("maniskill", str, "simulator: maniskill or mujoco (mujoco has the tabletop scene only)"),
+    "sim_python": (os.environ.get("MOBILE_PANDA_SIM_PYTHON", ""), str,
+                   "interpreter with the backend's packages; empty = ~/anaconda3/envs/mshab (maniskill) or llm (mujoco)"),
     "scene": ("kitchen", str, "kitchen (home: kitchen + dining + living room) or tabletop (skill-test table)"),
     "base": ("wheels", str, "wheels (physical differential drive) or planar (virtual x/y/yaw joints)"),
     "seed": ("0", int, "episode seed (red cube yaw)"),
-    "viewer": ("true", bool, "open the SAPIEN viewer window"),
+    "viewer": ("true", bool, "open the simulator's viewer window"),
     "start_x": ("nan", float, "initial chassis x in map (m); nan = scene default"),
     "start_y": ("nan", float, "initial chassis y in map (m); nan = scene default"),
     "start_yaw": ("nan", float, "initial chassis yaw (rad); nan = scene default"),
@@ -30,6 +31,8 @@ def nodes(context):
         raise RuntimeError("base must be wheels or planar")
     if LaunchConfiguration("scene").perform(context) not in ("kitchen", "tabletop"):
         raise RuntimeError("scene must be kitchen or tabletop")
+    if LaunchConfiguration("backend").perform(context) == "mujoco" and LaunchConfiguration("scene").perform(context) != "tabletop":
+        raise RuntimeError("the mujoco backend has the tabletop scene only; add scene:=tabletop")
     urdf = Path(get_package_share_directory("mobile_panda_description")) / f"urdf/mobile_panda_{base}.urdf"
     rviz_config = Path(get_package_share_directory("mobile_panda_bridge")) / "rviz/mobile_panda.rviz"
     parameters = {name: ParameterValue(LaunchConfiguration(name), value_type=kind) for name, (_, kind, _) in ARGS.items()}

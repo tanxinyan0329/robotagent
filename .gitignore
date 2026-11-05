@@ -11,6 +11,9 @@ outputs/
 skills/checkpoints/*
 !skills/checkpoints/README.md
 
+# Downloaded by scripts/download_menagerie.py
+/assets/
+
 # PPO training runs
 training/ppo/runs/
 training/ppo/wandb/

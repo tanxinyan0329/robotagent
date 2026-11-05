@@ -94,10 +94,11 @@ source ros2_ws/install/setup.bash
 ros2 launch mobile_panda_bridge simulation.launch.py              # 住宅场景，打开 SAPIEN 窗口
 ros2 launch mobile_panda_bridge simulation.launch.py viewer:=false rviz:=true
 ros2 launch mobile_panda_bridge simulation.launch.py scene:=tabletop base:=planar seed:=3
+ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco scene:=tabletop   # MuJoCo，见 docs/mujoco.md
 ```
 
 不在仓库根目录启动时，加 `project_root:=/path/to/mobile-panda-agent`，或设置环境变量 `MOBILE_PANDA_ROOT`。
-Conda 解释器默认是 `~/anaconda3/envs/mshab/bin/python`，不同时用 `sim_python:=...` 或 `MOBILE_PANDA_SIM_PYTHON` 指定。
+Conda 解释器默认是 `~/anaconda3/envs/mshab/bin/python`（`backend:=mujoco` 时是 `llm` 环境），不同时用 `sim_python:=...` 或 `MOBILE_PANDA_SIM_PYTHON` 指定。
 
 检查接口（另开终端，launch 运行中）：
 
@@ -139,7 +140,8 @@ python scripts/demo_mobile_pick.py --no-render --seeds 0 1 2 3 4   # 结构改�
 
 ## 已知限制
 
-- 机械臂沿用 ManiSkill Panda 的理想重力补偿（臂连杆不受重力），底盘连杆受重力。这不是完整的真实动力学模型。
+- MuJoCo 后端目前只有桌面场景，技能和训练还没有迁移，见 [docs/mujoco.md](docs/mujoco.md)。
+- ManiSkill 后端沿用 ManiSkill Panda 的理想重力补偿（臂连杆不受重力），底盘连杆受重力。这不是完整的真实动力学模型。
 - 轮式底盘的前后支撑是低摩擦球，不是带转向轴的万向轮；质量、惯性、摩擦是仿真初值，未做实机辨识。
 - 抓取过程中轮式底盘会漂移约 1–2 cm（演示脚本的门限是 2 cm）。
 - 没有障碍物地图话题；家具占地范围在 `/mobile_panda/scene_info` 中。
@@ -147,6 +149,8 @@ python scripts/demo_mobile_pick.py --no-render --seeds 0 1 2 3 4   # 结构改�
 - RViz 加载 `.glb` 网格时日志里没有报错，但还没有人眼确认显示效果。
 
 ## 来源
+
+- MuJoCo 后端的 Panda 模型来自 [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)（Apache-2.0），由 `scripts/download_menagerie.py` 下载，不在仓库里。
 
 本仓库整理自本地 `agent_demo/mobile_panda`（Windows 版移动 Panda），改为 Linux + `mshab` 环境，并新增 ROS2 接口。
 Panda 网格和 `panda_v2.urdf` 来自 ManiSkill（Apache-2.0）。住宅场景使用 ReplicaCAD（CC BY-NC 4.0，仅限非商业用途）

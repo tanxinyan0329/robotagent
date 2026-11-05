@@ -5,6 +5,7 @@ PACKAGE = "mobile_panda_description"
 DESCRIPTION = REPO / "ros2_ws/src" / PACKAGE
 CHECKPOINTS = REPO / "skills/checkpoints"
 OUTPUTS = REPO / "outputs"
+MENAGERIE_PANDA = REPO / "assets/mujoco_menagerie/franka_emika_panda"
 
 
 def ros_urdf(mode):

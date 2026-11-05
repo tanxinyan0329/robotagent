@@ -29,3 +29,12 @@ DEFAULT_START = (-1.15, -0.30, 0.0)
 MAX_LINEAR, MAX_ANGULAR = 0.25, 0.7
 MAX_JOINT_DELTA = 0.1
 GRIPPER_RANGE = (-0.01, 0.04)
+
+
+def tabletop_layout(start, robot):
+    """Static tabletop scene description (world frame, metres)."""
+    return dict(scene="tabletop", frame="map", floor_z=-HEIGHT, table_top_z=0.0,
+                table=dict(center=list(TABLE_CENTER), half_extents=list(TABLE_HALF)),
+                table_legs=[list(p) for p in TABLE_LEGS], table_leg_half=TABLE_LEG_HALF,
+                zones={name: dict(center=list(xy), half_extent=ZONE_HALF) for name, xy in ZONES.items()},
+                cube_half=CUBE_HALF, start=list(start), robot=robot)

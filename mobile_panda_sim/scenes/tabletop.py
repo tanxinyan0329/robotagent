@@ -10,7 +10,8 @@ from mani_skill.utils.building.ground import build_ground
 from mani_skill.utils.registration import register_env
 from mani_skill.utils.structs.pose import Pose
 
-from ..geometry import CUBE_HALF, CUBES, DEFAULT_START, HEIGHT, TABLE_CENTER, TABLE_HALF, TABLE_LEG_HALF, TABLE_LEGS, ZONE_HALF, ZONES
+from ..geometry import (CUBE_HALF, CUBES, DEFAULT_START, HEIGHT, TABLE_CENTER, TABLE_HALF, TABLE_LEG_HALF, TABLE_LEGS, ZONE_HALF, ZONES,
+                        tabletop_layout)
 from .base import MobilePandaSceneBase
 
 ZONE_COLORS = {"green_zone": [0.06, 0.65, 0.15, 1], "yellow_zone": [0.9, 0.75, 0.04, 1]}
@@ -56,9 +57,4 @@ class MobilePandaTabletop(MobilePandaSceneBase):
             cube.set_angular_velocity(torch.zeros((1, 3)))
 
     def layout(self):
-        """Static scene description (world frame, metres)."""
-        return dict(scene="tabletop", frame="map", floor_z=-HEIGHT, table_top_z=0.0,
-                    table=dict(center=list(TABLE_CENTER), half_extents=list(TABLE_HALF)),
-                    table_legs=[list(p) for p in TABLE_LEGS], table_leg_half=TABLE_LEG_HALF,
-                    zones={name: dict(center=list(xy), half_extent=ZONE_HALF) for name, xy in ZONES.items()},
-                    cube_half=CUBE_HALF, start=list(self.start), robot=self.robot_uids)
+        return tabletop_layout(self.start, self.robot_uids)
