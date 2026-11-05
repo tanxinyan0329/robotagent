@@ -20,14 +20,13 @@ from tf2_ros import TransformBroadcaster
 NS = "/mobile_panda"
 CAMERAS = ("base_camera", "hand_camera")
 CONDA_ROOTS = ("anaconda3", "miniconda3", "miniforge3")
-# Distribution name patterns, so that an editable install (ManiSkill from a checkout) is found too.
+# Patterns, so that an editable ManiSkill install is found too.
 BACKEND_PACKAGES = {"maniskill": ("mani*skill*", "python3.*"), "mujoco": ("mujoco-*", "python3.1[0-9]")}
 PREFERRED = {"maniskill": "mshab", "mujoco": "mplib-*"}
 
 
 def find_python(backend):
-    """Interpreter of a Conda environment that has the backend's simulator: `mshab` for ManiSkill, one that also
-    has mplib (the skills need it) for MuJoCo."""
+    """Interpreter of a Conda environment with the backend's simulator, preferring `mshab` or one that has mplib."""
     package, version = BACKEND_PACKAGES[backend]
     found = []
     for root in CONDA_ROOTS:

@@ -153,9 +153,8 @@ class ArmPlanner:
         self.attached = False
 
     def _use_cloud(self, enabled):
-        """mplib's IK rejects solutions touching the obstacle cloud. Contact poses (fingers around a
-        handle, on a table) must ignore it, so swap in a single far-away point when disabled. Rebuilding
-        mplib's collision tree is by far the slowest step of planning: do it only when the cloud changes."""
+        """mplib's IK rejects solutions touching the cloud, so contact poses swap in a far-away point. Rebuilding
+        the collision tree is the slowest step of planning: do it only when the cloud changes."""
         cloud = self._cloud if enabled and self.cloud_ready else FAR_POINT
         if cloud is not self._active_cloud:
             self.planner.update_point_cloud(cloud, radius=CLOUD_POINT_RADIUS)

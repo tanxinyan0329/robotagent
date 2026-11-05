@@ -24,6 +24,8 @@ python scripts/run_native_skill.py PushCube-v1 --checkpoint training/ppo/runs/pu
 - 自定义任务：继承 `mani_skill.envs.sapien_env.BaseEnv`，写 `_load_scene`、`_initialize_episode`、`evaluate`、`compute_dense_reward`，参考 `PickCube-v1` 源码。
 - 视觉策略：ManiSkill 3.0.1 的 `examples/baselines/ppo/ppo_rgb.py`（**没有拷进本仓库**），观测换成相机图像，训练更慢但不依赖真值位姿。本机 `~/projects/maniskill/ManiSkill-main` 里有一份，在 mshab 环境中试跑过（2026-11-04）。
 
+MuJoCo 上的训练见 [training/mujoco](../training/mujoco/README.md)，任务是抓取，只需要 CPU 并行加一张 GPU，1000 万步约 45 分钟。
+
 ## 2. 模仿学习：示范数据 + BC / Diffusion Policy
 
 ```bash

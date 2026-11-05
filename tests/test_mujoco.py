@@ -255,3 +255,60 @@ def test_suggested_base_pose_opens_and_closes(kitchen_skills):
     skills = park(pose)
     assert skills.open("kitchen_counter", "middle_slide_top").success
     assert skills.close("kitchen_counter", "middle_slide_top").success
+
+
+def test_pick_observation_matches_training():
+    from mobile_panda_sim.mj.pick_skill import PickObserver
+    from mobile_panda_sim.mj.pick_task import DOCK, PickCubeTask
+    task = PickCubeTask(1, seed=3, threads=1)
+    expected = task.observe()[0]
+    data = task.datas[0]
+    scene = MujocoScene("tabletop", "planar", DOCK)
+    scene.reset(0)
+    for name in ("red_cube", "blue_cube"):
+        address = scene.model.joint(name).qposadr[0]
+        scene.data.qpos[address:address + 7] = data.qpos[task.model.joint(name).qposadr[0]:task.model.joint(name).qposadr[0] + 7]
+    scene.data.qpos[scene.arm_q] = data.qpos[task.arm_q]
+    mujoco.mj_forward(scene.model, scene.data)
+    observed = PickObserver(scene, "red_cube").observation(task.goal[0])
+    assert np.allclose(observed, expected, atol=1e-5), np.abs(observed - expected).argmax()
+    scene.close()
+    task.close()
+
+
+def test_pick_task_reward_and_reset():
+    from mobile_panda_sim.mj.pick_task import ACTION_SIZE, MAX_STEPS, OBS_SIZE, PickCubeTask
+    task = PickCubeTask(4, seed=0, threads=1)
+    obs = task.reset()
+    assert obs.shape == (4, OBS_SIZE) and np.isfinite(obs).all()
+    assert np.abs(obs[:, 29:31]).max() <= 0.1
+    for _ in range(MAX_STEPS):
+        obs, reward, terminated, truncated, final, _ = task.step(np.zeros((4, ACTION_SIZE), dtype=np.float32))
+        assert np.all(reward >= 0) and np.all(reward <= 1)
+    assert truncated.all() and (task.steps == 0).all()
+    task.close()
+
+
+def test_closed_fingers_on_top_do_not_count_as_a_grasp():
+    from mobile_panda_sim.mj.pick_task import MIN_FINGER_GAP, PickCubeTask, is_grasped
+    task = PickCubeTask(1, seed=0, threads=1)
+    data = task.datas[0]
+    data.qpos[task.finger_q] = 0.0
+    assert not is_grasped(task.model, data, task.cube_geoms, task.finger_geoms, task.finger_q)
+    assert MIN_FINGER_GAP < 0.04
+    task.close()
+
+
+def test_trained_pick_policy():
+    torch = pytest.importorskip("torch")
+    from mobile_panda_sim.mj.pick_skill import PickPolicy
+    from mobile_panda_sim.mj.pick_task import MAX_STEPS, PickCubeTask
+    policy = PickPolicy()
+    task = PickCubeTask(64, seed=11)
+    obs, won = task.observe(), np.zeros(64, dtype=bool)
+    for _ in range(MAX_STEPS):
+        action = torch.stack([torch.from_numpy(policy(o)) for o in obs]).numpy()
+        obs, _, _, _, _, success = task.step(action)
+        won |= success
+    task.close()
+    assert won.mean() > 0.85

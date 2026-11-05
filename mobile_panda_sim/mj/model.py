@@ -27,9 +27,9 @@ FINGER_BODIES = {"left_finger": "panda_leftfinger", "right_finger": "panda_right
 CAMERA_AXES = np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]], dtype=np.float64)
 
 
-# Per finger, as in ManiSkill's Panda; the actuator drives the mean of both fingers, so it needs twice the gains.
+# Per finger; the actuator drives the mean of both fingers, so it gets twice these gains.
 FINGER_STIFFNESS, FINGER_DAMPING = 1000.0, 100.0
-FINGER_FRICTION = 1.15   # ManiSkill averages the finger's 2.0 with the default 0.3
+FINGER_FRICTION = 1.15
 ARM_JOINTS = [f"panda_joint{i}" for i in range(1, 8)]
 FINGER_JOINTS = ["panda_finger_joint1", "panda_finger_joint2"]
 REST_POSITIONS = dict(zip(ARM_JOINTS + FINGER_JOINTS, ARM_REST))
@@ -55,8 +55,7 @@ def compose(first, second):
 
 
 def load_panda():
-    """Menagerie Panda with the URDF's body and joint names. Gravity compensation goes through the joints, so the
-    arm does not sag but its weight still rests on the chassis; otherwise the base rocks on its wheel axle."""
+    """Menagerie Panda with the URDF's names; gravity compensation through the joints keeps its weight on the chassis."""
     xml = MENAGERIE_PANDA / "panda.xml"
     if not xml.is_file():
         raise FileNotFoundError(f"{xml} missing; run python scripts/download_menagerie.py")
@@ -98,7 +97,7 @@ def add_link_geoms(body, link):
         if collides and name in LOW_FRICTION_LINKS:
             geom.friction[0], geom.priority = 0.015, 1
         if wheel:
-            # A flat cylinder gets several ground contacts across its width and scrubs when turning on the spot.
+            # A cylinder's several ground contacts scrub when turning on the spot.
             radius, half_width = size[:2]
             body.add_geom(type=mujoco.mjtGeom.mjGEOM_ELLIPSOID, size=[radius, half_width, radius], group=3,
                           friction=[1.2, 0.005, 0.0001], priority=1, mass=0, rgba=[0, 0, 0, 0])
@@ -148,7 +147,7 @@ def add_robot(spec, base, x, y, z, yaw):
     if base == "wheels":
         body.add_freejoint(name="root")
     else:
-        body.mocap = True   # a fixed base MuJoCo would cache; reset() can still park it elsewhere
+        body.mocap = True   # plain fixed bodies are cached; reset() must be able to move it
     add_children(body, root_name)
     add_cameras(spec, root)
 

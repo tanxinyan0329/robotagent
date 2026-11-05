@@ -19,6 +19,23 @@ python scripts/download_checkpoints.py PegInsertionSide-v1 --with-demos   # 只�
 
 访问不了 huggingface.co 时先 `export HF_ENDPOINT=https://hf-mirror.com`。
 
+## 适用范围
+
+选技能前先看这张表。所有技能都读仿真真值，不经过相机；执行时底盘必须停稳。
+
+| 技能 | 能做 | 不能做 | 实测 | 仿真器 |
+|---|---|---|---|---|
+| `pick` | 从上方抓窄边小于 7.5 cm、放在够得着的台面上的物体 | 从侧面抓；抓抽屉、冰箱里的东西；台面靠墙一侧太远的物品 | 糖盒、梨、柠檬：ManiSkill 13/15（2 次碰动旁边的盒子），MuJoCo 15/15 | 两者 |
+| `place` | 把手中物体放到平整台面上 | 放进抽屉或冰箱；放到倾斜或很小的表面 | ManiSkill 15/15，MuJoCo 15/15 | 两者 |
+| `open` / `close` | 台柜上层左、中抽屉；冰箱上门开到约 35° 再关上 | 台柜右上和所有下层抽屉、冰箱下门、矮柜推拉门（把手太低，低于约 0.55 m）；从 70° 关冰箱门 | 各 15/15，两个仿真器相同 | 两者 |
+| `suggest_base_pose` | 给抽屉选一个开和关都够得着的停靠位 | 冰箱门：它假设底盘不动，ManiSkill 上从推荐位置关门只有 1/4，请用固定位置 `(0.249, 1.492, 1.107)` | 抽屉 16/16；冰箱门 MuJoCo 8/8，ManiSkill 开 4/4、关 1/4 | 两者 |
+| `home` | 手臂沿无碰撞路径回到收起姿态 | 手臂被卡住时 | 每轮都用到 | 两者 |
+| `mobile_pick_cube` | 桌面场景：抓起 4 cm 方块并举高 | 其他物体；放置；方块超出手臂前方 ±8/±10 cm | 20/20 | ManiSkill |
+| `mujoco_pick_cube` | 桌面场景：抓起 4 cm 方块并举高，方块可在手臂前方 ±10 cm 内 | 放置；避开旁边的物体；可靠地抓其他物体 | 方块 97.6%（500 回合）；移动抓取 80/80；未训练过的柠檬 9/9，梨 0/9 | MuJoCo |
+| ManiSkill 官方 PPO（10 个任务） | 各自的原始任务，固定底座、原始场景 | 移动底盘和住宅场景 | 29/30 | ManiSkill |
+
+抓住宅场景里的物品用 `pick`。两个强化学习策略只为方块训练，柠檬能抓成功不代表能用于其他物品：它们不知道物体形状，也不会避障。
+
 ## 0. 传统方法技能（住宅场景，不用训练）
 
 `mobile_panda_sim/manipulation/skills.py`，详细说明、实测结果和适用范围见 [docs/manipulation.md](../docs/manipulation.md)。
@@ -37,6 +54,8 @@ python scripts/demo_manipulation.py all --backend mujoco --repeat 5   # 同一�
 ```
 
 ## 1. 能在移动 Panda 场景里运行的技能
+
+MuJoCo 上用的是在 MuJoCo 里训练的权重：`python scripts/demo_mobile_pick.py --backend mujoco`，实测 80/80，见 [training/mujoco](../training/mujoco/README.md)。下表是 ManiSkill 的结果。
 
 | ID | 功能 | 代码 | 实测（seed 0–4） |
 |---|---|---|---|
@@ -104,6 +123,7 @@ python scripts/run_native_skill.py --all --report outputs/native_skills.json
 
 ## catalog.json 字段
 
-- `kind`：`ppo_adapted`（已适配到移动场景）、`ppo`（仅原任务）、`demonstrations_only`
+- `kind`：`classical`（传统方法）、`ppo_trained`（在 MuJoCo 上训练）、`ppo_adapted`（已适配到移动场景）、`ppo`（仅原任务）、`demonstrations_only`
+- `applies_to`、`not_for`：能做和不能做的事
 - `runs_in`：`mobile_scene` 或 `native_task`
 - `validated`：本仓库的实测结果、判据和运行环境

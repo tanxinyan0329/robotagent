@@ -69,15 +69,15 @@ class MujocoScene:
         mujoco.mj_forward(model, data)
 
     def settle(self):
-        """Let the props come to rest with their velocity damped: some start overlapping the furniture, which
-        ManiSkill resolves gently but MuJoCo's contacts would turn into a kick. Returns the resting poses."""
+        """Resting poses of the props, with the robot out of the way: some start overlapping the furniture, and
+        undamped MuJoCo contacts would kick them away."""
         model, data = self.model, self.data
         self.reset()
         addresses = [model.joint(name).dofadr[0] for name in self.objects]
         dofs = [a + i for a in addresses for i in range(6)]
         robot = [g for g in range(model.ngeom) if model.body_rootid[model.geom_bodyid[g]] == model.body_rootid[self.root]]
         contacts = model.geom_contype[robot].copy(), model.geom_conaffinity[robot].copy()
-        model.geom_contype[robot], model.geom_conaffinity[robot] = 0, 0   # a parked arm must not press on the props
+        model.geom_contype[robot], model.geom_conaffinity[robot] = 0, 0
         for _ in range(SETTLE_STEPS):
             mujoco.mj_step(model, data)
             data.qvel[dofs] *= SETTLE_DAMPING

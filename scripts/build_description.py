@@ -24,8 +24,7 @@ from mobile_panda_sim.paths import DESCRIPTION, PACKAGE
 MESH_URI = f"package://{PACKAGE}/meshes/franka"
 
 
-# Mounted at z=-0.165, 1 mm above the wheels' contact plane (z=-0.205). At 5 mm the chassis rocks 1.1 deg on its axle
-# and misses grasps; at 0 the supports carry the weight in PhysX, the wheels slip and the robot cannot drive.
+# 1 mm above the ground: at 5 mm the chassis rocks and grasps miss, at 0 the wheels slip and it cannot drive.
 SUPPORT_RADIUS = 0.039
 
 

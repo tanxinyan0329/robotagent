@@ -8,13 +8,12 @@ import numpy as np
 
 from ..paths import MUJOCO_KITCHEN
 
-STATIC, ARTICULATED = (1, 1), (2, 1)   # (contype, conaffinity): articulated links skip each other, as in ManiSkill
+STATIC, ARTICULATED = (1, 1), (2, 1)   # (contype, conaffinity); articulated links skip each other
 CAPSULE_X_TO_Z = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)
 SHAPES = {"box": mujoco.mjtGeom.mjGEOM_BOX, "capsule": mujoco.mjtGeom.mjGEOM_CAPSULE, "mesh": mujoco.mjtGeom.mjGEOM_MESH}
 LIGHTS = ((-1.6, 1.6), (1.4, 0.3), (2.4, -1.8), (-2.8, -1.4))
 PROP_DAMPING = 0.05
-# Small props otherwise keep rocking on a few contact points and creep across the table; sleeping also makes
-# the scene about 6x faster. A sleeping prop wakes as soon as something touches it.
+# Without damping and sleeping, small props keep rocking and creep across the table.
 SLEEP_TOLERANCE = 0.01
 
 

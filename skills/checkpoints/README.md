@@ -1,6 +1,6 @@
 # 技能权重
 
-本目录下除本文件外都不进 Git，用脚本下载：
+`mujoco/pick_cube.pt` 是在 MuJoCo 上训练的抓取策略，随仓库提供，见 [training/mujoco](../../training/mujoco/README.md)。其余内容不进 Git，用脚本下载：
 
 ```bash
 python scripts/download_checkpoints.py

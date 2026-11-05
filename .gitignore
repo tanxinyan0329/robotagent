@@ -10,12 +10,14 @@ outputs/
 # Weights are downloaded (scripts/download_checkpoints.py); keep the license/readme
 skills/checkpoints/*
 !skills/checkpoints/README.md
+!skills/checkpoints/mujoco/
 
 # Downloaded by scripts/download_menagerie.py
 /assets/
 
 # PPO training runs
 training/ppo/runs/
+training/mujoco/runs/
 training/ppo/wandb/
 
 # colcon artifacts

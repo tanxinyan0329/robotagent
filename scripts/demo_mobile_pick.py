@@ -1,7 +1,8 @@
 """Mobile pick demo (ported from agent_demo/mobile_panda/demo_drive.py, Linux, new tabletop scene).
 
 Drive from the start pose to a docking pose in front of the chosen cube, stop, then run the official
-PickCube PPO through the observation adapter and check the grasp holds for one more second.
+pick policy through the observation adapter and check the grasp holds for one more second. --backend mujoco
+uses the policy trained on MuJoCo (training/mujoco/train_pick.py); the default is ManiSkill's PickCube PPO.
 One reset per episode; nothing is teleported. Navigation is a simple go-to-point controller for an
 obstacle-free approach, not a planner. Runs in-process (no ROS) so it can be used as a skill test.
 
@@ -19,22 +20,23 @@ import time
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import gymnasium as gym  # noqa: E402
-import torch  # noqa: E402
-
-import mobile_panda_sim.scenes  # noqa: E402,F401
-from mobile_panda_sim.geometry import ARM_REST, CUBES, DEFAULT_START  # noqa: E402
-from mobile_panda_sim.skills.pick_cube import GOAL_HEIGHT, PickPolicy, encode, in_training_range  # noqa: E402
+from mobile_panda_sim.geometry import ARM_REST, CUBES, DEFAULT_START, MAX_JOINT_DELTA  # noqa: E402
 
 DOCK_X = -0.615
+GOAL_HEIGHT = 0.16
 
 
 def wrap(a):
     return math.atan2(math.sin(a), math.cos(a))
 
 
-class Demo:
+class ManiSkillRobot:
     def __init__(self, args):
+        import gymnasium as gym
+        import torch
+        import mobile_panda_sim.scenes  # noqa: F401
+        from mobile_panda_sim.skills.pick_cube import PickPolicy, encode, in_training_range
+        self.torch, self.encode, self.in_training_range = torch, encode, in_training_range
         self.args = args
         self.env = gym.make("MobilePandaTabletop-v1", robot_uids=f"mobile_panda_{args.base}", start=args.start,
                             obs_mode="none", control_mode="pd_joint_delta_pos", sim_backend="physx_cpu",
@@ -43,11 +45,104 @@ class Demo:
         names = [j.name for j in self.w.agent.robot.get_active_joints()]
         self.arm_ids = [names.index(n) for n in self.w.agent.arm_joint_names]
         self.policy = PickPolicy()
-        self.writer = None
+        self.dt = float(self.w.control_timestep)
+
+    def reset(self, seed, cube):
+        self.env.reset(seed=seed)
+        self.cube = self.w.cubes[cube]
 
     def base(self):
         t = self.w.agent.robot.links_map["chassis_link"].pose.to_transformation_matrix()[0]
         return np.array([float(t[0, 3]), float(t[1, 3]), math.atan2(float(t[1, 0]), float(t[0, 0]))])
+
+    def cube_position(self):
+        return self.cube.pose.p[0].cpu().numpy()
+
+    def grasped(self):
+        return bool(self.w.agent.is_grasping(self.cube)[0])
+
+    def cube_in_range(self):
+        return self.in_training_range(self.w, self.cube)
+
+    def step(self, velocity, goal):
+        torch = self.torch
+        with torch.no_grad():
+            if goal is not None:
+                out = self.policy(self.encode(self.w, self.cube, torch.tensor([goal], dtype=torch.float32)))
+                arm, grip = out[:, :7], out[:, 7:8]
+            else:
+                q = self.w.agent.robot.get_qpos()[:, self.arm_ids]
+                arm = ((torch.tensor(ARM_REST[:7])[None] - q) / MAX_JOINT_DELTA).clamp(-0.7, 0.7)
+                grip = torch.ones((1, 1))
+            base = torch.tensor([self.w.agent.base_action(*velocity)], dtype=torch.float32)
+            self.env.step(self.w.agent.controller.from_action_dict(dict(arm=arm, gripper=grip, base=base)))
+        if not self.args.no_render:
+            self.w.render()
+            time.sleep(0.02)
+
+    def frame(self):
+        return self.w.render()[0].cpu().numpy()
+
+    def close(self):
+        self.env.close()
+
+
+class MujocoRobot:
+    def __init__(self, args):
+        from mobile_panda_sim.geometry import GRIPPER_RANGE
+        from mobile_panda_sim.mj.pick_skill import PickObserver, PickPolicy
+        from mobile_panda_sim.mj.sim import MujocoScene
+        self.observer_type, self.gripper_range = PickObserver, GRIPPER_RANGE
+        self.args = args
+        self.scene = MujocoScene("tabletop", args.base, args.start, viewer=not args.no_render)
+        self.policy = PickPolicy()
+        self.dt = self.scene.control_timestep
+
+    def reset(self, seed, cube):
+        self.scene.reset(seed)
+        self.body = self.scene.objects[cube]
+        self.observer = self.observer_type(self.scene, cube)
+
+    def base(self):
+        position, q = self.scene.pose(self.scene.chassis)
+        return np.array([position[0], position[1], math.atan2(2*(q[0]*q[3] + q[1]*q[2]), 1 - 2*(q[2]**2 + q[3]**2))])
+
+    def cube_position(self):
+        return self.scene.pose(self.body)[0]
+
+    def grasped(self):
+        return self.observer.grasped()
+
+    def cube_in_range(self):
+        return self.observer.cube_in_range()
+
+    def step(self, velocity, goal):
+        low, high = self.gripper_range
+        if goal is not None:
+            action = self.policy(self.observer.observation(goal))
+            arm, width = action[:7]*MAX_JOINT_DELTA, low + (action[7] + 1)/2*(high - low)
+        else:
+            q = self.scene.joint_positions()[-9:-2]
+            arm, width = np.clip(np.array(ARM_REST[:7]) - q, -0.07, 0.07), high
+        self.scene.step(velocity[0], velocity[1], arm, width)
+        if not self.args.no_render:
+            time.sleep(self.dt)
+
+    def frame(self):
+        return self.scene.capture_rgb()["base_camera"]
+
+    def close(self):
+        self.scene.close()
+
+
+class Demo:
+    def __init__(self, args):
+        self.args = args
+        self.robot = (MujocoRobot if args.backend == "mujoco" else ManiSkillRobot)(args)
+        self.writer = None
+
+    def base(self):
+        return self.robot.base()
 
     def event(self, phase, **extra):
         self.phase = phase
@@ -55,28 +150,15 @@ class Demo:
         self.events.append(record)
         print(json.dumps(record), flush=True)
 
-    @torch.no_grad()
     def step(self, velocity=(0.0, 0.0), policy=False):
         before = self.base()
-        if policy:
-            out = self.policy(encode(self.w, self.cube, self.goal))
-            arm, grip = out[:, :7], out[:, 7:8]
-        else:
-            q = self.w.agent.robot.get_qpos()[:, self.arm_ids]
-            arm = ((torch.tensor(ARM_REST[:7])[None] - q) / 0.1).clamp(-0.7, 0.7)
-            grip = torch.ones((1, 1))
-        base = torch.tensor([self.w.agent.base_action(*velocity)], dtype=torch.float32)
-        self.env.step(self.w.agent.controller.from_action_dict(dict(arm=arm, gripper=grip, base=base)))
+        self.robot.step(velocity, self.goal if policy else None)
         self.steps += 1
         after = self.base()
-        dt = float(self.w.control_timestep)
-        self.speed = float(np.linalg.norm(after[:2] - before[:2])) / dt
-        self.yaw_speed = abs(wrap(after[2] - before[2])) / dt
+        self.speed = float(np.linalg.norm(after[:2] - before[:2])) / self.robot.dt
+        self.yaw_speed = abs(wrap(after[2] - before[2])) / self.robot.dt
         if self.writer:
-            self.writer.append_data(self.w.render()[0].cpu().numpy())
-        elif not self.args.no_render:
-            self.w.render()
-            time.sleep(0.02)
+            self.writer.append_data(self.robot.frame())
 
     def settle(self, n=25):
         for _ in range(n):
@@ -115,23 +197,22 @@ class Demo:
         raise RuntimeError("navigation did not reach docking tolerance")
 
     def pick(self):
-        if not in_training_range(self.w, self.cube):
-            raise RuntimeError("cube outside the PickCube policy's training range from this docking pose")
+        if not self.robot.cube_in_range():
+            raise RuntimeError("cube outside the pick policy's training range from this docking pose")
         start = self.base()
         self.event("ppo_pick")
         stable = 0
         for _ in range(160):
             self.step(policy=True)
-            grasped = bool(self.w.agent.is_grasping(self.cube)[0])
-            at_goal = float(torch.linalg.norm(self.cube.pose.p - self.goal)) <= 0.025
-            stable = stable + 1 if grasped and at_goal else 0
+            at_goal = float(np.linalg.norm(self.robot.cube_position() - self.goal)) <= 0.025
+            stable = stable + 1 if self.robot.grasped() and at_goal else 0
             if stable >= 5:
                 break
         else:
             raise RuntimeError("policy did not grasp the cube and reach the lift goal")
         for _ in range(20):
             self.step(policy=True)
-            if not bool(self.w.agent.is_grasping(self.cube)[0]) or float(self.cube.pose.p[0, 2]) < 0.10:
+            if not self.robot.grasped() or float(self.robot.cube_position()[2]) < 0.10:
                 raise RuntimeError("cube dropped during sustained-grasp check")
         drift = float(np.linalg.norm(self.base()[:2] - start[:2]))
         if drift > 0.02:
@@ -140,11 +221,10 @@ class Demo:
         return dict(base_drift=drift)
 
     def run(self, seed, record=None):
-        self.env.reset(seed=seed)
+        self.robot.reset(seed, self.args.cube)
         self.steps, self.events, self.speed, self.yaw_speed, self.phase = 0, [], 0.0, 0.0, "start"
-        self.cube = self.w.cubes[self.args.cube]
-        cube_xy = self.cube.pose.p[0, :2].tolist()
-        self.goal = torch.tensor([[*cube_xy, GOAL_HEIGHT]])
+        cube_xy = [float(v) for v in self.robot.cube_position()[:2]]
+        self.goal = [*cube_xy, GOAL_HEIGHT]
         if record:
             import imageio
             Path(record).parent.mkdir(parents=True, exist_ok=True)
@@ -167,6 +247,7 @@ class Demo:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--backend", choices=("maniskill", "mujoco"), default="maniskill")
     p.add_argument("--base", choices=("wheels", "planar"), default="wheels")
     p.add_argument("--cube", choices=sorted(CUBES), default="red_cube")
     p.add_argument("--start", nargs=3, type=float, default=list(DEFAULT_START), metavar=("X", "Y", "YAW"))
@@ -179,7 +260,7 @@ def main():
     try:
         results = [demo.run(s, args.record if i == 0 else None) for i, s in enumerate(args.seeds)]
     finally:
-        demo.env.close()
+        demo.robot.close()
     summary = dict(base=args.base, cube=args.cube, start=args.start, successes=sum(r["success"] for r in results),
                    episodes=len(results), results=results)
     if args.report:

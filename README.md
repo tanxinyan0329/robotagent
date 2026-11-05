@@ -128,6 +128,8 @@ ros2 run mobile_panda_bridge teleop_check
 
 详见 [skills/README.md](skills/README.md)。概要：
 
+每个技能能做和不能做的事见 [skills/README.md](skills/README.md#适用范围)。
+
 | 类别 | 内容 | 实测 |
 |---|---|---|
 | 传统方法技能 | 住宅场景里的抓取、放置、开关抽屉和冰箱门（逆运动学 + 运动规划，不用训练），见 [docs/manipulation.md](docs/manipulation.md) | 抽屉开 10/10、关 10/10；抓放 6/6；冰箱门开 35° 5/5、关 4/5 |
@@ -135,7 +137,7 @@ ros2 run mobile_panda_bridge teleop_check
 | 原任务 PPO | ManiSkill 官方 10 个 Panda 技能（推、拉、戳、推 T、滚球、扶正、堆叠、双臂抓取/堆叠等） | 29/30（RollBall seed 0 失败） |
 | 示范轨迹 | 插销、插充电器、用工具拉方块（无策略，可作模仿学习数据） | — |
 | 外部参考 | ManipGen、GraspGen、M2T2、cuRobo、RoboCasa 等 18 项 | 见 [EXTERNAL_SKILLS.md](skills/EXTERNAL_SKILLS.md) |
-| 训练方法 | ManiSkill PPO（脚本已附带，已实测）、模仿学习、迁移到移动场景 | 见 [TRAINING.md](skills/TRAINING.md) |
+| 训练方法 | MuJoCo PPO（[training/mujoco](training/mujoco/README.md)，抓取任务）、ManiSkill PPO（脚本已附带，已实测）、模仿学习、迁移到移动场景 | 见 [TRAINING.md](skills/TRAINING.md) |
 
 技能目前通过 Python 调用（`scripts/demo_manipulation.py`、`scripts/demo_mobile_pick.py`），**还没有接到 ROS 话题上**；学生的 Agent 通过 ROS 控制机器人。
 
@@ -153,7 +155,7 @@ python scripts/demo_mobile_pick.py --no-render --seeds 0 1 2 3 4   # 结构改�
 
 ## 已知限制
 
-- MuJoCo 后端有两个场景和全部操作技能，但强化学习训练还没有迁移，见 [docs/mujoco.md](docs/mujoco.md)。
+- MuJoCo 后端有两个场景、全部操作技能和抓取任务的强化学习；其他任务的 PPO 和模仿学习还只能在 ManiSkill 上用，见 [docs/mujoco.md](docs/mujoco.md)。
 - ManiSkill 后端沿用 ManiSkill Panda 的理想重力补偿（臂连杆不受重力），底盘连杆受重力。这不是完整的真实动力学模型。
 - 轮式底盘的前后支撑是低摩擦球，不是带转向轴的万向轮；质量、惯性、摩擦是仿真初值，未做实机辨识。
 - 轮式底盘的支撑球离地 1 mm，车身会有约 0.25° 的翘动；抓方块时底盘漂移不到 1 mm，拉冰箱门时 ManiSkill 的底盘可能被带动几厘米。

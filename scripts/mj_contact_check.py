@@ -387,7 +387,6 @@ def pick_prop(scene, arm, name):
     grasp = np.array([centre[0], centre[1], max(high - 0.04, low + 0.5*(high - low), low + 0.012)])
     before = {n: scene.pose(b)[0] for n, b in scene.objects.items()}
     current = scene.data.qpos[scene.arm_q].copy()
-    # Either finger can take either side: use the one needing the smaller wrist turn.
     options = [down_quat(np.arctan2(n[0], -n[1])) for n in (narrow, -narrow)]
     top_down = min(options, key=lambda quat: min((np.abs(q - current).sum() for q in arm.solutions(grasp + [0, 0, 0.12], quat, current, tries=12)),
                                                  default=np.inf))
@@ -411,7 +410,6 @@ def kitchen():
     scene = MujocoScene("kitchen", "wheels", (-2.95, -1.15, 3.1416))
     scene.reset(0)
     arm = Arm(scene)
-    # The stowed hand hangs over the console from this base pose, low enough to touch the tall boxes.
     arm.joint_move(np.array(READY_POSES[0]))
     results += [pick_prop(scene, arm, name) for name in ("sugar_box", "pear", "lemon")]
     scene.close()

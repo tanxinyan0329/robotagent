@@ -29,7 +29,9 @@
       "runs_on": [
         "maniskill",
         "mujoco"
-      ]
+      ],
+      "applies_to": "窄边小于 7.5 cm、放在够得着的台面上的物体，从上方抓",
+      "not_for": "从侧面抓；抽屉和冰箱里的物品；台面靠墙一侧太远的物品"
     },
     {
       "id": "classical_place",
@@ -58,7 +60,9 @@
       "runs_on": [
         "maniskill",
         "mujoco"
-      ]
+      ],
+      "applies_to": "平整台面",
+      "not_for": "放进抽屉或冰箱；倾斜或很小的表面"
     },
     {
       "id": "classical_open",
@@ -86,7 +90,9 @@
       "runs_on": [
         "maniskill",
         "mujoco"
-      ]
+      ],
+      "applies_to": "台柜上层左、中抽屉；冰箱上门到约 35°",
+      "not_for": "把手低于约 0.55 m 的抽屉和柜门；冰箱下门；矮柜推拉门"
     },
     {
       "id": "classical_close",
@@ -114,7 +120,9 @@
       "runs_on": [
         "maniskill",
         "mujoco"
-      ]
+      ],
+      "applies_to": "台柜上层左、中抽屉；冰箱上门从约 35° 关上",
+      "not_for": "把手低于约 0.55 m 的抽屉和柜门；从 70° 关冰箱门"
     },
     {
       "id": "mobile_pick_cube",
@@ -148,7 +156,39 @@
         "environment": "Ubuntu 22.04, conda env mshab (ManiSkill 3.0.0b18, SAPIEN 3.0.0b1, torch 2.8.0), physx_cpu, 2026-11-03",
         "criterion": "停稳后抓起并到达举升目标点（PickCube 判据：距目标 ≤2.5 cm），之后持续夹持 1 s 不掉落，抓取过程中底盘漂移 <2 cm",
         "note": "蓝块初始朝向固定 yaw=0，各 seed 的蓝块场景相同；红块朝向随 seed 变化"
-      }
+      },
+      "applies_to": "桌面场景的 4 cm 方块，抓起并举高",
+      "not_for": "其他物体；放置"
+    },
+    {
+      "id": "mujoco_pick_cube",
+      "name": "MuJoCo 上训练的方块抓取",
+      "source_task": "PickCube-v1",
+      "download": false,
+      "robot": "mobile_panda_wheels / mobile_panda_planar",
+      "kind": "ppo_trained",
+      "runs_in": "mobile_scene",
+      "runs_on": [
+        "mujoco"
+      ],
+      "control_mode": "joint delta",
+      "action": "arm(7)+gripper(1)，底盘保持静止",
+      "checkpoint": "skills/checkpoints/mujoco/pick_cube.pt",
+      "code": "mobile_panda_sim/mj/pick_skill.py",
+      "training": "training/mujoco/train_pick.py",
+      "demo": "scripts/demo_mobile_pick.py --backend mujoco",
+      "observation": "42 维观测，定义同 PickCube-v1，由适配器换算到训练坐标系",
+      "preconditions": "底盘停稳；方块在机械臂前方 0.615±0.1 m、左右 ±0.1 m 内并放在桌面上",
+      "validated": {
+        "results": {
+          "task, 500 episodes": "97.6%",
+          "mobile pick, 2 bases x 2 cubes x 20 seeds": "80/80"
+        },
+        "environment": "Ubuntu 22.04, mujoco 3.5.0, 2026-11-05"
+      },
+      "docs": "training/mujoco/README.md",
+      "applies_to": "桌面场景的 4 cm 方块，抓起并举高",
+      "not_for": "放置；避障；可靠地抓其他物体（未训练过的柠檬 9/9，梨 0/9）"
     },
     {
       "id": "PickCube-v1",
@@ -174,7 +214,9 @@
         "failed_seeds": []
       },
       "obs_dim": 42,
-      "act_dim": 8
+      "act_dim": 8,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "PushCube-v1",
@@ -200,7 +242,9 @@
         "failed_seeds": []
       },
       "obs_dim": 35,
-      "act_dim": 8
+      "act_dim": 8,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "PullCube-v1",
@@ -226,7 +270,9 @@
         "failed_seeds": []
       },
       "obs_dim": 35,
-      "act_dim": 8
+      "act_dim": 8,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "PokeCube-v1",
@@ -252,7 +298,9 @@
         "failed_seeds": []
       },
       "obs_dim": 54,
-      "act_dim": 8
+      "act_dim": 8,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "PushT-v1",
@@ -278,7 +326,9 @@
         "failed_seeds": []
       },
       "obs_dim": 31,
-      "act_dim": 7
+      "act_dim": 7,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "RollBall-v1",
@@ -306,7 +356,9 @@
         ]
       },
       "obs_dim": 44,
-      "act_dim": 8
+      "act_dim": 8,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "LiftPegUpright-v1",
@@ -332,7 +384,9 @@
         "failed_seeds": []
       },
       "obs_dim": 32,
-      "act_dim": 8
+      "act_dim": 8,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "StackCube-v1",
@@ -358,7 +412,9 @@
         "failed_seeds": []
       },
       "obs_dim": 48,
-      "act_dim": 8
+      "act_dim": 8,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "TwoRobotPickCube-v1",
@@ -384,7 +440,9 @@
         "failed_seeds": []
       },
       "obs_dim": 66,
-      "act_dim": 16
+      "act_dim": 16,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "TwoRobotStackCube-v1",
@@ -410,7 +468,9 @@
         "failed_seeds": []
       },
       "obs_dim": 76,
-      "act_dim": 16
+      "act_dim": 16,
+      "applies_to": "ManiSkill 原任务（固定底座、原始场景）",
+      "not_for": "移动底盘和住宅场景"
     },
     {
       "id": "PegInsertionSide-v1",
@@ -422,7 +482,9 @@
       "runs_in": "native_task",
       "note": "只有运动规划示范轨迹，没有策略网络；可作为模仿学习数据",
       "fetch": "python scripts/download_checkpoints.py PegInsertionSide-v1 --with-demos",
-      "validated": "未在本仓库运行（无策略，只有示范轨迹）"
+      "validated": "未在本仓库运行（无策略，只有示范轨迹）",
+      "applies_to": "示范数据，可用于模仿学习",
+      "not_for": "没有策略，不能直接运行"
     },
     {
       "id": "PlugCharger-v1",
@@ -434,7 +496,9 @@
       "runs_in": "native_task",
       "note": "只有运动规划示范轨迹，没有策略网络；可作为模仿学习数据",
       "fetch": "python scripts/download_checkpoints.py PlugCharger-v1 --with-demos",
-      "validated": "未在本仓库运行（无策略，只有示范轨迹）"
+      "validated": "未在本仓库运行（无策略，只有示范轨迹）",
+      "applies_to": "示范数据，可用于模仿学习",
+      "not_for": "没有策略，不能直接运行"
     },
     {
       "id": "PullCubeTool-v1",
@@ -446,7 +510,9 @@
       "runs_in": "native_task",
       "note": "只有运动规划示范轨迹，没有策略网络；可作为模仿学习数据",
       "fetch": "python scripts/download_checkpoints.py PullCubeTool-v1 --with-demos",
-      "validated": "未在本仓库运行（无策略，只有示范轨迹）"
+      "validated": "未在本仓库运行（无策略，只有示范轨迹）",
+      "applies_to": "示范数据，可用于模仿学习",
+      "not_for": "没有策略，不能直接运行"
     }
   ],
   "checkpoint_license": "ManiSkill 官方权重和示范数据来自 Hugging Face 数据集 haosulab/ManiSkill_Demonstrations，许可证 Apache-2.0",

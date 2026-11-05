@@ -132,6 +132,8 @@ pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")
 
 ## 能用和不能用的
 
+所有技能的总表见 [skills/README.md](../skills/README.md#适用范围)。
+
 | 对象 | 能否使用 | 原因 |
 |---|---|---|
 | 台柜上层左、中抽屉（把手 0.59 / 0.66 m） | 能 | |

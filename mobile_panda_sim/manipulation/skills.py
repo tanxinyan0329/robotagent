@@ -110,8 +110,7 @@ class ManipulationSkills:
             self._step(target)
 
     def _settle_base(self, steps=40, still=0.0003):
-        """Hold the arm until the chassis stops moving: plans are made from its pose, and after a reset or a
-        drag it is still rolling."""
+        """Hold the arm until the chassis stops moving; plans are made from its pose."""
         hold = self.planner.qpos()[:7]
         last = self.world.link0_pose().p
         for _ in range(steps):
@@ -122,7 +121,7 @@ class ManipulationSkills:
             last = now
 
     def _correct(self, grasp, tolerance=0.002, tries=2):
-        """Remove the hand error left by base motion during an approach, from where the base is now."""
+        """Remove the hand error left by base motion during an approach."""
         for _ in range(tries):
             if np.linalg.norm(self.planner.tcp_pose().p - grasp.p) < tolerance:
                 return
@@ -495,12 +494,9 @@ class ManipulationSkills:
         return best
 
     def suggest_base_pose(self, articulation, joint, target=None, round_trip=True):
-        """Chassis pose (x, y, yaw) facing the handle from which the joint can be moved to `target` and, with
-        `round_trip`, back to closed. Returns ((x, y, yaw), coverage); coverage in [0, 1] is the share of the
-        worse direction that is reachable. Does not move the robot. Footprints of furniture (scene layout)
-        are kept 5 cm clear of the chassis. Among fully reachable poses it takes the middle of the feasible
-        distance band, not the closest: the edge of that band works in the kinematic estimate and then
-        fails on small base or grasp errors."""
+        """Chassis pose from which the joint can be moved to `target` and, with `round_trip`, back to closed. Returns
+        ((x, y, yaw), coverage), coverage being the reachable share of the worse direction. Kinematic only: assumes
+        the base does not move. Takes the middle of the feasible distance band; its edge is too close to the limit."""
         model = self._joint_model(articulation, joint, target, True)
         link_name = self.world.moving_link(articulation, joint)
         handle, _, normal, _ = self._handle_frame(articulation, joint)

@@ -18,7 +18,8 @@ launch 自动选择 Python 3.10 以上、装了 `mujoco` 的 Conda 环境，优�
 | ROS 接口（`teleop_check`）、窗口、两个 RGB 相机 | 完成 |
 | 住宅场景：家具、42 个可动物体、台柜、冰箱、矮柜 | 完成 |
 | `manipulation/` 操作技能（`pick`、`place`、`open`、`close`、`home`、`suggest_base_pose`） | 完成，和 ManiSkill 共用同一份代码 |
-| 强化学习训练和预训练策略 | 未迁移，仍只能在 ManiSkill 上用 |
+| 强化学习：抓取任务的训练、权重和移动抓取例程 | 完成，见 [training/mujoco](../training/mujoco/README.md) |
+| 强化学习：其他任务（推、拉、堆叠等）和模仿学习 | 未迁移，仍只能在 ManiSkill 上用 |
 
 ## 模型
 
@@ -61,6 +62,7 @@ python scripts/mj_contact_check.py --seeds 0 1 2 3 4
 | 项目 | 结果 |
 |---|---|
 | 正式技能（抓取、放置、开关抽屉和冰箱门） | 轮式底盘 5 轮 90/90，平面底盘 2 轮 36/36，详见 [manipulation.md](manipulation.md) |
+| 训练出的抓取策略 | 500 回合 97.6%；移动抓取 80/80 |
 | 抓方块（抬高 12 cm，保持 3 s） | 10/10，末端跟踪误差约 0.2 mm，滑移最大 3.8 mm |
 | 抽屉：拉开 25 cm 再关回 1 cm | 5/5，拉到 24.9 cm，关到约 1 cm，底盘漂移约 3 mm |
 | 厨房：抓糖盒、梨、柠檬 | 3/3，抬高 11.6–12.0 cm，没有碰动其他物体 |
