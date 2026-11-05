@@ -17,12 +17,19 @@
       "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
       "validated": {
         "results": {
-          "entry_console sugar_box/pear/lemon": "6/6"
+          "entry_console sugar_box/pear/lemon": {
+            "maniskill": "13/15",
+            "mujoco": "15/15"
+          }
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
-        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+        "environment": "Ubuntu 22.04, 2026-11-05, wheels base, 5 rounds: maniskill (physx_cpu), mujoco 3.5.0"
       },
-      "docs": "docs/manipulation.md"
+      "docs": "docs/manipulation.md",
+      "runs_on": [
+        "maniskill",
+        "mujoco"
+      ]
     },
     {
       "id": "classical_place",
@@ -39,12 +46,19 @@
       "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
       "validated": {
         "results": {
-          "entry_console": "6/6, error 0.1-2.3 cm"
+          "entry_console": {
+            "maniskill": "15/15",
+            "mujoco": "15/15"
+          }
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
-        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+        "environment": "Ubuntu 22.04, 2026-11-05, wheels base, 5 rounds: maniskill (physx_cpu), mujoco 3.5.0"
       },
-      "docs": "docs/manipulation.md"
+      "docs": "docs/manipulation.md",
+      "runs_on": [
+        "maniskill",
+        "mujoco"
+      ]
     },
     {
       "id": "classical_open",
@@ -61,14 +75,18 @@
       "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
       "validated": {
         "results": {
-          "kitchen_counter middle_slide_top": "5/5",
-          "kitchen_counter left_slide_top": "5/5",
-          "fridge top_door_hinge to 0.6 rad": "5/5"
+          "kitchen_counter middle_slide_top": "5/5 on both",
+          "kitchen_counter left_slide_top": "5/5 on both",
+          "fridge top_door_hinge to 0.6 rad": "5/5 on both"
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
-        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+        "environment": "Ubuntu 22.04, 2026-11-05, wheels base, 5 rounds: maniskill (physx_cpu), mujoco 3.5.0"
       },
-      "docs": "docs/manipulation.md"
+      "docs": "docs/manipulation.md",
+      "runs_on": [
+        "maniskill",
+        "mujoco"
+      ]
     },
     {
       "id": "classical_close",
@@ -85,14 +103,18 @@
       "preconditions": "底盘停稳；目标在机械臂可达范围内（把手高于约 0.55 m；可用 suggest_base_pose 选停靠位置）",
       "validated": {
         "results": {
-          "kitchen_counter middle_slide_top": "5/5",
-          "kitchen_counter left_slide_top": "5/5",
-          "fridge top_door_hinge from 0.6 rad": "4/5"
+          "kitchen_counter middle_slide_top": "5/5 on both",
+          "kitchen_counter left_slide_top": "5/5 on both",
+          "fridge top_door_hinge from 0.6 rad": "5/5 on both"
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
-        "environment": "Ubuntu 22.04, conda env mshab, physx_cpu, 2026-11-04 (wheels base)"
+        "environment": "Ubuntu 22.04, 2026-11-05, wheels base, 5 rounds: maniskill (physx_cpu), mujoco 3.5.0"
       },
-      "docs": "docs/manipulation.md"
+      "docs": "docs/manipulation.md",
+      "runs_on": [
+        "maniskill",
+        "mujoco"
+      ]
     },
     {
       "id": "mobile_pick_cube",

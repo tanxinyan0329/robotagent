@@ -1,7 +1,6 @@
 # 移动 Panda 仿真 ROS2 接口
 
-在 ManiSkill 中加载一台**差速底盘 + Franka Panda** 的移动机械臂和一个住宅场景（厨房 + 餐厅 + 客厅），
-通过 ROS2 开放控制和感知接口，供学生编写 Agent。附带技能库：传统方法的抓取 / 放置 / 开关柜门、预训练技能、外部技能参考和训练方法。
+在仿真中加载一台**差速底盘 + Franka Panda** 的移动机械臂和一个住宅场景（厨房 + 餐厅 + 客厅），默认用 ManiSkill，也可以用 MuJoCo，通过 ROS2 开放控制和感知接口，供学生编写 Agent。两个仿真器的接口相同。附带技能库：传统方法的抓取 / 放置 / 开关柜门、预训练技能、外部技能参考和训练方法。
 
 ## 交付内容
 
@@ -55,7 +54,7 @@ launch 参数 `scene` 选择场景：
 
 - Ubuntu 22.04 + ROS2 Humble（系统 Python 3.10）
 - Conda 环境 `mshab`：与 [mshab-agent](https://github.com/tanxinyan0329/mshab-agent) 相同（Python 3.9，ManiSkill mshab 分支 3.0.0b18，PyTorch）。
-  本仓库**不需要额外的 Conda 环境，也不需要 pip install**；仿真进程通过 `PYTHONPATH` 加载 `mobile_panda_sim/`。
+  ManiSkill 后端**不需要额外的 Conda 环境，也不需要 pip install**；仿真进程通过 `PYTHONPATH` 加载 `mobile_panda_sim/`。
 - 仿真使用 CPU 物理（`physx_cpu`），渲染需要支持 Vulkan 的显卡。
 
 ROS2 节点运行在系统 Python 上，不导入 Torch；仿真进程运行在 Conda Python 上，不导入 rclpy。两者通过进程管道通信。
@@ -84,6 +83,20 @@ python scripts/download_checkpoints.py
 
 访问不了 huggingface.co 时先 `export HF_ENDPOINT=https://hf-mirror.com`。
 
+使用 MuJoCo 时再做下面这步（只用 ManiSkill 可以跳过）。需要一个 Python 3.10 以上的 Conda 环境，导出厨房仍要用 `mshab`：
+
+```bash
+# 4. MuJoCo 后端
+conda create -n panda-mujoco python=3.10 -y
+conda activate panda-mujoco
+pip install -r requirements-mujoco.txt
+python scripts/download_menagerie.py               # Panda 模型，约 36 MB
+conda deactivate
+conda activate mshab
+python scripts/export_kitchen_mujoco.py            # 从 ManiSkill 导出厨房，约 19 MB
+conda deactivate
+```
+
 ## 启动
 
 在仓库根目录：
@@ -98,7 +111,7 @@ ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco            
 ```
 
 不在仓库根目录启动时，加 `project_root:=/path/to/mobile-panda-agent`，或设置环境变量 `MOBILE_PANDA_ROOT`。
-Conda 解释器默认是 `~/anaconda3/envs/mshab/bin/python`（`backend:=mujoco` 时是 `llm` 环境），不同时用 `sim_python:=...` 或 `MOBILE_PANDA_SIM_PYTHON` 指定。
+launch 会自动找装了对应仿真器的 Conda 环境，启动日志里会打印用的是哪个；找错或找不到时用 `sim_python:=...` 或 `MOBILE_PANDA_SIM_PYTHON` 指定。
 
 检查接口（另开终端，launch 运行中）：
 
@@ -143,7 +156,7 @@ python scripts/demo_mobile_pick.py --no-render --seeds 0 1 2 3 4   # 结构改�
 - MuJoCo 后端有两个场景和全部操作技能，但强化学习训练还没有迁移，见 [docs/mujoco.md](docs/mujoco.md)。
 - ManiSkill 后端沿用 ManiSkill Panda 的理想重力补偿（臂连杆不受重力），底盘连杆受重力。这不是完整的真实动力学模型。
 - 轮式底盘的前后支撑是低摩擦球，不是带转向轴的万向轮；质量、惯性、摩擦是仿真初值，未做实机辨识。
-- 抓取过程中轮式底盘会漂移约 1–2 cm（演示脚本的门限是 2 cm）。
+- 轮式底盘的支撑球离地 1 mm，车身会有约 0.25° 的翘动；抓方块时底盘漂移不到 1 mm，拉冰箱门时 ManiSkill 的底盘可能被带动几厘米。
 - 没有障碍物地图话题；家具占地范围在 `/mobile_panda/scene_info` 中。
 - 技能只能在 Python 里调用，还没有接到 ROS 话题上；操作技能的适用范围见 [docs/manipulation.md](docs/manipulation.md)。
 - RViz 加载 `.glb` 网格时日志里没有报错，但还没有人眼确认显示效果。

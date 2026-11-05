@@ -3,13 +3,12 @@
 ROS 话题、消息格式和 ManiSkill 后端相同，学生的 Agent 不用改。切换只需要一个 launch 参数：
 
 ```bash
-python3 scripts/download_menagerie.py        # 只需一次：下载 Panda 模型（Apache-2.0，不在仓库里）
-~/anaconda3/envs/mshab/bin/python scripts/export_kitchen_mujoco.py    # 只需一次：导出厨房，要在 mshab 环境里运行
+# 准备工作见 README 的安装第 4 步：安装依赖、下载 Panda 模型、导出厨房
 ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco                  # 住宅场景
 ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco scene:=tabletop  # 桌面场景
 ```
 
-`sim_python` 默认是 `~/anaconda3/envs/llm/bin/python`。换别的环境时用 `sim_python:=...` 指定，需要 Python 3.10+ 和 `mujoco`（在 3.5.0 上测试）。操作技能另外需要 `mplib==0.1.1`。
+launch 自动选择 Python 3.10 以上、装了 `mujoco` 的 Conda 环境，优先选同时装了 `mplib` 的。也可以用 `sim_python:=...` 指定。版本见 `requirements-mujoco.txt`，只在这些版本上测试过。
 
 目前进度：
 
@@ -34,13 +33,12 @@ ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco scene:=tabl
 | 改动 | 原因 |
 |---|---|
 | 重力补偿经关节执行器施加 | 手臂不下垂，但重量仍压在底盘上。ManiSkill 里手臂不受重力 |
-| 支撑球碰撞半径 4 cm（URDF 是 3.5 cm） | URDF 的支撑球离地 5 mm，车体只靠两个轮子立着，会前后摆动约 ±1.2°，末端跟着晃 2 cm |
 | 轮子碰撞体用椭球，外观仍是圆柱 | 圆柱和地面有多个接触点，原地转向时刮地，转向量只有指令的 60% |
 | 夹爪增益改成每指 1000 N/m、100 N·s/m | 和 ManiSkill 一致。Menagerie 默认值的夹持力不到 2 N，抓方块够用，拉抽屉会滑脱 |
 
 ## 住宅场景
 
-场景不是手写的。`scripts/export_kitchen_mujoco.py` 加载运行中的 ManiSkill 场景，把几何、位姿、质量、关节、把手和贴图导出到 `assets/mujoco_kitchen/`（约 18 MB，不进 git，ReplicaCAD 数据仅限非商业用途）。厨房改了就重新导出一次。
+场景不是手写的。`scripts/export_kitchen_mujoco.py` 加载运行中的 ManiSkill 场景，把几何、位姿、质量、关节、把手和贴图导出到 `assets/mujoco_kitchen/`（约 19 MB，不进 git，ReplicaCAD 数据仅限非商业用途）。厨房改了就重新导出一次。
 
 - **碰撞体**：柜体的方盒和胶囊、可动物体的凸分解都直接沿用。12 件固定家具原来是非凸网格，MuJoCo 不支持，现在按连通块处理：凸块用凸包；明显非凸的闭合块（椅子、沙发靠背、桌子侧框）用 2 cm 体素合并成方盒，所以表面有约 1 cm 的台阶；不闭合的块（绿植、垃圾桶）仍用凸包，镂空处是实心的。
 - **沉降**：有些物品一开始就和家具重叠（煎锅嵌进台面约 8 cm，ManiSkill 里也一样）。加载时先带阻尼沉降，把结果作为重置位姿，否则物品会被弹开。
@@ -49,9 +47,11 @@ ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco scene:=tabl
 
 ## 测试
 
+在装了 `requirements-mujoco.txt` 的环境里运行：
+
 ```bash
-~/anaconda3/envs/llm/bin/python -m pytest tests/test_mujoco.py -q
-~/anaconda3/envs/llm/bin/python scripts/mj_contact_check.py --seeds 0 1 2 3 4
+python -m pytest tests/test_mujoco.py -q
+python scripts/mj_contact_check.py --seeds 0 1 2 3 4
 ```
 
 `test_mujoco.py` 把模型和 ManiSkill 的实测值、URDF 正运动学逐项对比，并检查厨房的关节范围、物品稳定性和重置。`mj_contact_check.py` 验证接触物理：桌面上抓方块、开关一个测试抽屉，再到厨房开关真实的抽屉和冰箱门、抓玄关台的物品。它用带碰撞检查的简化 IK，不是正式技能。正式技能的回归是 `scripts/demo_manipulation.py all --backend mujoco --repeat 5`。
@@ -79,5 +79,5 @@ ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco scene:=tabl
 - `teleop_check` 的前进量比 ManiSkill 大约 5%，转向量大约 10–15%。两者都没超过指令加 0.3 s 超时的上限（前进 0.345 m，转向 0.92 rad），应该是响应更快、停车前多走了一点，还没有逐项对比确认。
 - 厨房物品沉降后和 ManiSkill 的位置略有差别：高度最多差 7 mm，水平大多在 1 cm 内，遥控器最大 2.7 cm。
 - 在玄关台停靠位 (-2.95, -1.15, π) 上，收起姿态的手会碰到高盒子。ManiSkill 里也是这个姿态。
-- 底盘比 ManiSkill 稳：拉抽屉时基本不动，ManiSkill 会被带着移动约 3 cm。依赖这点选的停靠位不能直接搬过来，见 [manipulation.md](manipulation.md)。
+- 底盘受力时比 ManiSkill 稳：拉冰箱门时基本不动，ManiSkill 会被带动几厘米，见 [manipulation.md](manipulation.md)。
 - 夹爪压紧时接触略软：夹 4 cm 方块时指间距 3.85 cm，夹 1.8 cm 横杆时 1.69 cm。

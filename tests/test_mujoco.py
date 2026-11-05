@@ -244,3 +244,14 @@ def test_drawer_skill(kitchen_skills):
     assert world.joint_position("kitchen_counter", "middle_slide_top") > 0.2
     assert skills.close("kitchen_counter", "middle_slide_top").success
     assert abs(world.joint_position("kitchen_counter", "middle_slide_top")) < 0.03
+
+
+@needs_kitchen
+def test_suggested_base_pose_opens_and_closes(kitchen_skills):
+    park, world = kitchen_skills
+    skills = park((-2.55, -1.95, 1.5708))
+    pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")
+    assert coverage > 0.99
+    skills = park(pose)
+    assert skills.open("kitchen_counter", "middle_slide_top").success
+    assert skills.close("kitchen_counter", "middle_slide_top").success

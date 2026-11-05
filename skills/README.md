@@ -25,15 +25,15 @@ python scripts/download_checkpoints.py PegInsertionSide-v1 --with-demos   # 只�
 
 | 技能 | 功能 | 实测 |
 |---|---|---|
-| `pick(name)` | 从上方抓起物体（窄边 < 7.5 cm），抬高 12 cm | 玄关台：糖盒、梨、柠檬 6/6 |
+| `pick(name)` | 从上方抓起物体（窄边 < 7.5 cm），抬高 12 cm | 玄关台糖盒、梨、柠檬：ManiSkill 13/15（2 次碰动旁边的盒子），MuJoCo 15/15 |
 | `place((x, y))` | 把手里的物体放到 (x, y) 处的台面上 | 6/6，误差 0.1–2.3 cm |
-| `open` / `close(articulation, joint)` | 抓住把手拉开或关上抽屉、柜门，够不着时重新抓 | 台柜上层抽屉：开 10/10、关 10/10；冰箱上门开 35°：5/5，关上：4/5 |
-| `suggest_base_pose(articulation, joint)` | 计算底盘停在哪里能完成开或关 | — |
+| `open` / `close(articulation, joint)` | 抓住把手拉开或关上抽屉、柜门，够不着时重新抓 | 两个上层抽屉和冰箱上门：ManiSkill、MuJoCo 各开 15/15、关 15/15 |
+| `suggest_base_pose(articulation, joint)` | 计算底盘停在哪里既能拉开又能关回 | 用推荐位置开关 4 次：抽屉两个后端都全过；冰箱门 MuJoCo 全过，ManiSkill 关 1/4 |
 | `home()` | 机械臂沿无碰撞路径回到收起姿态 | — |
 
 ```bash
 python scripts/demo_manipulation.py all --repeat 3 --report outputs/manipulation.json
-~/anaconda3/envs/llm/bin/python scripts/demo_manipulation.py all --backend mujoco --repeat 5   # 同一份技能，跑在 MuJoCo 上
+python scripts/demo_manipulation.py all --backend mujoco --repeat 5   # 同一份技能跑在 MuJoCo 上，在 MuJoCo 环境里运行
 ```
 
 ## 1. 能在移动 Panda 场景里运行的技能

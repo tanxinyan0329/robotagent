@@ -24,6 +24,11 @@ from mobile_panda_sim.paths import DESCRIPTION, PACKAGE
 MESH_URI = f"package://{PACKAGE}/meshes/franka"
 
 
+# Mounted at z=-0.165, 1 mm above the wheels' contact plane (z=-0.205). At 5 mm the chassis rocks 1.1 deg on its axle
+# and misses grasps; at 0 the supports carry the weight in PhysX, the wheels slip and the robot cannot drive.
+SUPPORT_RADIUS = 0.039
+
+
 def link(root, name, shape=None, size=None, mass=1.0, color="0.15 0.22 0.3 1", collision=True):
     out = E.SubElement(root, "link", name=name)
     inert = E.SubElement(out, "inertial")
@@ -132,7 +137,7 @@ def build():
             joint(root, f"{side}_wheel_joint", "chassis_link", f"{side}_wheel", xyz=f"0 {y} -0.105",
                   kind="continuous" if mode == "wheels" else "fixed", axis="0 1 0" if mode == "wheels" else None)
         for side, x in (("front", 0.23), ("rear", -0.23)):
-            link(root, f"{side}_support", "sphere", 0.035, mass=0.5,
+            link(root, f"{side}_support", "sphere", SUPPORT_RADIUS, mass=0.5,
                  color="0.15 0.15 0.15 1", collision=mode == "wheels")
             joint(root, f"{side}_support_mount", "chassis_link", f"{side}_support", xyz=f"{x} 0 -0.165")
         original = E.parse(source).getroot()

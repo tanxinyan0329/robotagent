@@ -18,8 +18,6 @@ ROOT_ABOVE_FLOOR = {"wheels": 0.205 + 0.002, "planar": 0.0}
 GEOM_TYPES = {"box": mujoco.mjtGeom.mjGEOM_BOX, "cylinder": mujoco.mjtGeom.mjGEOM_CYLINDER, "sphere": mujoco.mjtGeom.mjGEOM_SPHERE}
 JOINT_TYPES = {"continuous": mujoco.mjtJoint.mjJNT_HINGE, "prismatic": mujoco.mjtJoint.mjJNT_SLIDE}
 LOW_FRICTION_LINKS = ("front_support", "rear_support")
-# The URDF's 0.035 m supports stop 5 mm above the ground, which leaves the chassis balancing on its wheels.
-SUPPORT_RADIUS = 0.04
 BASE_DRIVES = {"wheels": dict(kv=30.0, force=40.0, limit=10.0), "planar": dict(kv=3000.0, force=5000.0, limit=10.0)}
 ZONE_COLORS = {"green_zone": [0.06, 0.65, 0.15, 1], "yellow_zone": [0.9, 0.75, 0.04, 1]}
 CUBE_COLORS = {"red_cube": [1, 0, 0, 1], "blue_cube": [0.05, 0.12, 0.95, 1]}
@@ -99,7 +97,6 @@ def add_link_geoms(body, link):
         geom.contype = geom.conaffinity = 1 if collides and not wheel else 0
         if collides and name in LOW_FRICTION_LINKS:
             geom.friction[0], geom.priority = 0.015, 1
-            geom.size[0] = SUPPORT_RADIUS
         if wheel:
             # A flat cylinder gets several ground contacts across its width and scrubs when turning on the spot.
             radius, half_width = size[:2]

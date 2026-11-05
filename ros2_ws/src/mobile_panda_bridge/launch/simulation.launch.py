@@ -14,7 +14,7 @@ ARGS = {
     "project_root": (os.environ.get("MOBILE_PANDA_ROOT", os.getcwd()), str, "repository root (contains mobile_panda_sim/)"),
     "backend": ("maniskill", str, "simulator: maniskill or mujoco"),
     "sim_python": (os.environ.get("MOBILE_PANDA_SIM_PYTHON", ""), str,
-                   "interpreter with the backend's packages; empty = ~/anaconda3/envs/mshab (maniskill) or llm (mujoco)"),
+                   "interpreter with the backend's packages; empty = find a Conda environment that has them"),
     "scene": ("kitchen", str, "kitchen (home: kitchen + dining + living room) or tabletop (skill-test table)"),
     "base": ("wheels", str, "wheels (physical differential drive) or planar (virtual x/y/yaw joints)"),
     "seed": ("0", int, "episode seed (red cube yaw)"),

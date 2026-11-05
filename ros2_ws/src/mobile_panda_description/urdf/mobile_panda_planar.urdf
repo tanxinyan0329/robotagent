@@ -130,11 +130,11 @@
   <link name="front_support">
     <inertial>
       <mass value="0.5" />
-      <inertia ixx="0.00024500000000000005" iyy="0.00024500000000000005" izz="0.00024500000000000005" ixy="0" ixz="0" iyz="0" />
+      <inertia ixx="0.0003042" iyy="0.0003042" izz="0.0003042" ixy="0" ixz="0" iyz="0" />
     </inertial>
     <visual>
       <geometry>
-        <sphere radius="0.035" />
+        <sphere radius="0.039" />
       </geometry>
       <material name="front_support_paint">
         <color rgba="0.15 0.15 0.15 1" />
@@ -149,11 +149,11 @@
   <link name="rear_support">
     <inertial>
       <mass value="0.5" />
-      <inertia ixx="0.00024500000000000005" iyy="0.00024500000000000005" izz="0.00024500000000000005" ixy="0" ixz="0" iyz="0" />
+      <inertia ixx="0.0003042" iyy="0.0003042" izz="0.0003042" ixy="0" ixz="0" iyz="0" />
     </inertial>
     <visual>
       <geometry>
-        <sphere radius="0.035" />
+        <sphere radius="0.039" />
       </geometry>
       <material name="rear_support_paint">
         <color rgba="0.15 0.15 0.15 1" />

@@ -13,6 +13,7 @@ CLOUD_RADIUS = 1.25
 CLOUD_DENSITY = 8000
 IDLE_PERIOD = 1 / 30
 CLOUD_POINT_RADIUS = 0.015
+FAR_POINT = np.array([[50.0, 50.0, 50.0]])
 
 
 def _slerp(q0, q1, t):
@@ -77,6 +78,7 @@ class ArmPlanner:
             joint_vel_limits=np.full(7, joint_vel_limit), joint_acc_limits=np.full(7, joint_acc_limit))
         self.planner.set_base_pose(np.array([0, 0, 0, 1, 0, 0, 0], dtype=np.float64))
         self.cloud_ready = False
+        self._active_cloud = None
         self.idle = None
         self._last_idle = 0.0
 
@@ -120,19 +122,27 @@ class ArmPlanner:
 
     def use_cloud(self, cloud):
         """Make a cloud from build_cloud() the active obstacle set."""
-        self._cloud = cloud if len(cloud) else np.array([[50.0, 50.0, 50.0]])
+        self._cloud = cloud if len(cloud) else FAR_POINT
         self.cloud_ready = True
         self._use_cloud(True)
 
-    def build_cloud(self, exclude=(), clear=None):
-        """Sample the scene's collision geometry near the arm into the planner's point cloud."""
+    def build_cloud(self, exclude=(), clear=None, points=None):
+        """Sample the scene's collision geometry near the arm into the planner's point cloud. `points` reuses
+        scene_points() instead of sampling, for evaluating many base poses."""
         base = self.base_pose()
         inv = base.inv().to_transformation_matrix()
-        cloud = self.world.surface_points(exclude, base.p, CLOUD_RADIUS, CLOUD_DENSITY, self.tick)
+        if points is None:
+            cloud = self.world.surface_points(exclude, base.p, CLOUD_RADIUS, CLOUD_DENSITY, self.tick)
+        else:
+            cloud = points[np.linalg.norm(points - base.p, axis=1) < CLOUD_RADIUS]
         if clear is not None:
             cloud = cloud[np.linalg.norm(cloud - np.asarray(clear[0]), axis=1) > clear[1]]
         cloud = cloud @ inv[:3, :3].T + inv[:3, 3]
         return cloud.astype(np.float64)
+
+    def scene_points(self, exclude, centre, reach):
+        """World points of the scene around `centre`, enough for any arm base within `reach` of it."""
+        return self.world.surface_points(exclude, np.asarray(centre), CLOUD_RADIUS + reach, CLOUD_DENSITY, self.tick)
 
     def attach_box(self, size, tcp_to_box):
         """Treat a held object as a box (full size, pose relative to the TCP) during planning."""
@@ -144,9 +154,12 @@ class ArmPlanner:
 
     def _use_cloud(self, enabled):
         """mplib's IK rejects solutions touching the obstacle cloud. Contact poses (fingers around a
-        handle, on a table) must ignore it, so swap in a single far-away point when disabled."""
-        cloud = self._cloud if enabled and self.cloud_ready else np.array([[50.0, 50.0, 50.0]])
-        self.planner.update_point_cloud(cloud, radius=CLOUD_POINT_RADIUS)
+        handle, on a table) must ignore it, so swap in a single far-away point when disabled. Rebuilding
+        mplib's collision tree is by far the slowest step of planning: do it only when the cloud changes."""
+        cloud = self._cloud if enabled and self.cloud_ready else FAR_POINT
+        if cloud is not self._active_cloud:
+            self.planner.update_point_cloud(cloud, radius=CLOUD_POINT_RADIUS)
+            self._active_cloud = cloud
 
     def ik(self, world_pose, seed=None, n_init=30, avoid=False):
         """Arm joint solutions (7,) for a TCP world pose, closest to `seed` (default: current joints)
@@ -154,10 +167,7 @@ class ArmPlanner:
         self.tick()
         start = self.qpos() if seed is None else np.concatenate([seed, self.qpos()[7:]])
         self._use_cloud(avoid)
-        try:
-            status, solutions = self.planner.IK(self._vec(self.to_base(world_pose)), start, n_init_qpos=n_init)
-        finally:
-            self._use_cloud(True)
+        status, solutions = self.planner.IK(self._vec(self.to_base(world_pose)), start, n_init_qpos=n_init)
         if status != "Success" or solutions is None:
             return []
         solutions = [np.asarray(s)[:7] for s in solutions]
@@ -168,6 +178,7 @@ class ArmPlanner:
         q = np.concatenate([q7, self.qpos()[7:]])
         if self.planner.check_for_self_collision(self.planner.robot, q):
             return True
+        self._use_cloud(True)
         return bool(avoid and self.cloud_ready and self.planner.check_for_env_collision(
             self.planner.robot, q, with_point_cloud=True, use_attach=getattr(self, "attached", False)))
 
@@ -187,6 +198,7 @@ class ArmPlanner:
             if np.abs(np.asarray(g) - current).max() < 1e-3:
                 return np.asarray([current])
         goals = [np.concatenate([g, fingers]) for g in goals]
+        self._use_cloud(avoid)
         for _ in range(3):
             try:
                 result = self.planner.plan_qpos_to_qpos(goals, self.qpos(), time_step=self.dt, planning_time=planning_time,

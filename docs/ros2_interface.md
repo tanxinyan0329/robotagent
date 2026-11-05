@@ -8,7 +8,7 @@
 ```text
 ros2 launch ──> mobile_panda_bridge（系统 Python，rclpy）
                    │  stdin/stdout，逐行 JSON
-                   └─> mobile_panda_sim.ros2.worker（Conda mshab，ManiSkill/SAPIEN）
+                   └─> mobile_panda_sim.ros2.worker（Conda 环境：ManiSkill 或 MuJoCo）
                 robot_state_publisher（URDF + joint_states → TF）
 ```
 

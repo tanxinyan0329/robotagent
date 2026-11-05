@@ -14,6 +14,8 @@ APPROACH = 0.10
 LIFT = 0.12
 CONTACT_JOINT_STEP = 0.015
 HAND_CLEARANCE = 0.008
+SEARCH_REACH = 1.2
+BAND_WIDTH = 0.1
 
 
 @dataclass
@@ -107,6 +109,28 @@ class ManipulationSkills:
                 break
             self._step(target)
 
+    def _settle_base(self, steps=40, still=0.0003):
+        """Hold the arm until the chassis stops moving: plans are made from its pose, and after a reset or a
+        drag it is still rolling."""
+        hold = self.planner.qpos()[:7]
+        last = self.world.link0_pose().p
+        for _ in range(steps):
+            self._step(hold)
+            now = self.world.link0_pose().p
+            if np.linalg.norm(now - last) < still:
+                break
+            last = now
+
+    def _correct(self, grasp, tolerance=0.002, tries=2):
+        """Remove the hand error left by base motion during an approach, from where the base is now."""
+        for _ in range(tries):
+            if np.linalg.norm(self.planner.tcp_pose().p - grasp.p) < tolerance:
+                return
+            line = self.planner.plan_line(grasp, step=0.003)
+            if line is None:
+                return
+            self._follow(_densify(line, CONTACT_JOINT_STEP), tol=0.002)
+
     def _set_gripper(self, value, steps=12):
         self.gripper = value
         hold = self.planner.qpos()[:7]
@@ -137,6 +161,7 @@ class ManipulationSkills:
         if np.abs(self.planner.qpos()[:7] - grasp_q).max() > 0.02 and \
                 np.linalg.norm(self.planner.fk(grasp_q).p - grasp.p) < 0.005:
             self._follow(_densify(np.stack([self.planner.qpos()[:7], grasp_q]), CONTACT_JOINT_STEP))
+        self._correct(grasp)
 
     def _back_off(self):
         """Best effort: pull the open gripper straight back along its approach axis (10, 6 or 3 cm)."""
@@ -372,7 +397,7 @@ class ManipulationSkills:
                     cand["clearance"] = (c2, tip - c2, gap)
         return candidates
 
-    def _drag_path(self, model, cand, grasp, dqs, seed, max_jump=0.35, avoid=False):
+    def _drag_path(self, model, cand, grasp, dqs, seed, max_jump=0.35, avoid=False, offset=0.0):
         """IK chain that moves a held link through joint offsets `dqs`, starting from TCP pose `grasp`. The
         gripper may roll about the candidate's roll axis (within +/-80 deg) to stay reachable. Returns
         (joint waypoints, steps reached)."""
@@ -396,7 +421,7 @@ class ManipulationSkills:
                     continue
                 solutions = self.planner.ik(model["moved"](rolled, dq), seed=seed, n_init=4, avoid=avoid)
                 if door is not None:
-                    solutions = [q for q in solutions if self._outside_door(q, door, model, dq)]
+                    solutions = [q for q in solutions if self._outside_door(q, door, model, offset + dq)]
                 if solutions:
                     jump = np.abs(solutions[0] - seed).max()
                     if jump <= max_jump and (best is None or jump < best[0]):
@@ -433,7 +458,7 @@ class ManipulationSkills:
         n = max(2, int(abs(final) / model["step"]))
         return np.linspace(0, final, n + 1)[1:], abs(span)
 
-    def _progress(self, model, cand, grasp_q, q_now, avoid=True, coarse=False):
+    def _progress(self, model, cand, grasp_q, q_now, avoid=True, coarse=False, offset=0.0):
         """Joint distance (m or rad) towards the goal this candidate can drag. By default the same IK chain
         (step size, allowed joint jump) as the real drag, so the choice is not over-optimistic; `coarse`
         (base-pose search) checks every other step with a looser jump limit, ~3x faster."""
@@ -441,7 +466,7 @@ class ManipulationSkills:
         if coarse and len(dqs) > 3:
             dqs = dqs[1::2]
         _, reached = self._drag_path(model, cand, cand["grasp"], dqs, grasp_q, max_jump=0.5 if coarse else 0.35,
-                                     avoid=avoid)
+                                     avoid=avoid, offset=offset)
         return min(abs(dqs[reached - 1]) if reached else 0.0, span)
 
     def _best_drag(self, model, link, q_now, full_cloud, free_cloud, need=None, offset=0.0, skip=(), coarse=False):
@@ -462,18 +487,21 @@ class ManipulationSkills:
             if pre_q is None:
                 continue
             self.planner.use_cloud(free_cloud)
-            progress = self._progress(model, cand, solutions[0], q_now, coarse=coarse)
+            progress = self._progress(model, cand, solutions[0], q_now, coarse=coarse, offset=offset)
             if best is None or progress > best[0] + 1e-6:
                 best = (progress, cand, solutions[0], pre_q)
             if progress >= (need if need is not None else abs(model["goal"] - q_now)) - 1e-6:
                 break
         return best
 
-    def suggest_base_pose(self, articulation, joint, target=None, opening=True):
-        """Search chassis poses (x, y, yaw) facing the handle from which the whole open/close motion is
-        reachable. Returns ((x, y, yaw), coverage) with coverage in [0, 1], best first; does not move.
-        Footprints of furniture (scene layout) are kept 5 cm clear of the chassis."""
-        model = self._joint_model(articulation, joint, target, opening)
+    def suggest_base_pose(self, articulation, joint, target=None, round_trip=True):
+        """Chassis pose (x, y, yaw) facing the handle from which the joint can be moved to `target` and, with
+        `round_trip`, back to closed. Returns ((x, y, yaw), coverage); coverage in [0, 1] is the share of the
+        worse direction that is reachable. Does not move the robot. Footprints of furniture (scene layout)
+        are kept 5 cm clear of the chassis. Among fully reachable poses it takes the middle of the feasible
+        distance band, not the closest: the edge of that band works in the kinematic estimate and then
+        fails on small base or grasp errors."""
+        model = self._joint_model(articulation, joint, target, True)
         link_name = self.world.moving_link(articulation, joint)
         handle, _, normal, _ = self._handle_frame(articulation, joint)
         if model["kind"] == "revolute":
@@ -481,9 +509,17 @@ class ManipulationSkills:
         out = np.r_[normal[:2], 0.0]; out /= np.linalg.norm(out)
         side = np.array([-out[1], out[0], 0.0])
         blocked = [f["footprint"] for f in self.world.layout()["furniture"]]
-        best = []
+        over = 0.02 if model["kind"] == "prismatic" else 0.05
+        legs = [(model["q0"], model["goal"])]
+        if round_trip:
+            legs.append((model["goal"] + math.copysign(over, model["goal"] - model["q0"]), 0.0))
+        full_points = self.planner.scene_points((), handle, SEARCH_REACH)
+        free_points = self.planner.scene_points({link_name}, handle, SEARCH_REACH)
+        candidates, first_full = [], None
         try:
             for distance in np.arange(0.40, 1.05, 0.025):
+                if first_full is not None and distance > first_full + BAND_WIDTH:
+                    break
                 for lateral in (0.0, -0.1, 0.1, -0.2, 0.2, -0.3, 0.3, -0.45, 0.45, -0.6, 0.6):
                     xy = handle[:2] + out[:2] * distance + side[:2] * lateral
                     yaw = math.atan2(handle[1] - xy[1], handle[0] - xy[0])
@@ -493,20 +529,28 @@ class ManipulationSkills:
                     if not any(self.planner.ik(c["grasp"], n_init=6) for c in
                                self._drag_candidates(articulation, joint)[:40]):
                         continue
-                    full = self.planner.build_cloud()
-                    free = self.planner.build_cloud(exclude={link_name})
-                    coverage = self._plan_stages(model, full, free) / max(abs(model["goal"] - model["q0"]), 1e-6)
+                    full = self.planner.build_cloud(points=full_points)
+                    free = self.planner.build_cloud(points=free_points)
+                    coverage = 1.0
+                    for start, goal in legs:
+                        coverage = min(coverage, self._plan_stages(dict(model, goal=goal), full, free, start))
+                        if coverage == 0:
+                            break
                     if coverage > 0:
-                        best.append((min(coverage, 1.0), -distance, (float(xy[0]), float(xy[1]), float(yaw))))
-                if best and max(b[0] for b in best) >= 0.999:
-                    break
+                        candidates.append((min(coverage, 1.0), float(distance), abs(lateral), (float(xy[0]), float(xy[1]), float(yaw))))
+                    if coverage >= 0.999 and first_full is None:
+                        first_full = float(distance)
         finally:
             self.planner.virtual_base = None
             self.planner.cloud_ready = False
-        if not best:
+        if not candidates:
             return None, 0.0
-        coverage, _, pose = max(best)
-        return pose, coverage
+        best = max(c[0] for c in candidates)
+        top = [c for c in candidates if c[0] >= best - 1e-3]
+        distances = sorted(c[1] for c in top)
+        middle = distances[len(distances) // 2]
+        chosen = min(top, key=lambda c: (abs(c[1] - middle), c[2]))
+        return chosen[3], chosen[0]
 
     @staticmethod
     def _chassis_blocked(xy, yaw, footprints, margin=0.05):
@@ -517,12 +561,13 @@ class ManipulationSkills:
         lo, hi = corners.min(0), corners.max(0)
         return any(lo[0] < f[1] and hi[0] > f[0] and lo[1] < f[3] and hi[1] > f[2] for f in footprints)
 
-    def _plan_stages(self, model, full_cloud, free_cloud, stages=3):
-        """Kinematic estimate (no physics) of how far a sequence of up to `stages` grasp-and-drag stages
-        gets the joint towards the goal from the current base pose."""
-        q, total = model["q0"], 0.0
-        span = abs(model["goal"] - model["q0"])
-        sign = math.copysign(1.0, model["goal"] - model["q0"])
+    def _plan_stages(self, model, full_cloud, free_cloud, start=None, stages=3):
+        """Kinematic estimate (no physics) of the share of the way from joint position `start` (default: where
+        it is now) to model["goal"] that up to `stages` grasp-and-drag stages cover from the current base pose."""
+        q = model["q0"] if start is None else start
+        span = abs(model["goal"] - q)
+        sign = math.copysign(1.0, model["goal"] - q)
+        total = 0.0
         for _ in range(stages):
             best = self._best_drag(model, None, q, full_cloud, free_cloud, need=span - total, offset=q - model["q0"],
                                    coarse=True)
@@ -532,7 +577,7 @@ class ManipulationSkills:
             q += sign * best[0]
             if total >= span - 1e-6:
                 break
-        return total
+        return total / max(span, 1e-6)
 
     def _actuate(self, articulation, joint, target, opening, stages=3):
         verb = "open" if opening else "close"
@@ -547,6 +592,7 @@ class ManipulationSkills:
             link = self.world.moving_link(articulation, joint)
             tolerance = 0.03 if kind == "prismatic" else 0.08
             log, failed = [], set()
+            self._settle_base()
             for stage in range(stages + 2):
                 model = self._joint_model(articulation, joint, target, opening)
                 q_now = model["q0"]
@@ -578,8 +624,7 @@ class ManipulationSkills:
                     continue
                 model = self._joint_model(articulation, joint, target, opening)
                 dqs, _ = self._drag_targets(model, model["q0"])
-                self.planner.use_cloud(self.planner.build_cloud(exclude={link},
-                                                                clear=(self.planner.tcp_pose().p, 0.08)))
+                self.planner.use_cloud(self.planner.build_cloud(exclude={link}, clear=(self.planner.tcp_pose().p, 0.08)))
                 path, reached = self._drag_path(model, cand, self.planner.tcp_pose(), dqs, self.planner.qpos()[:7], avoid=True)
                 checked = True
                 if reached < 3:

@@ -19,8 +19,27 @@ from tf2_ros import TransformBroadcaster
 
 NS = "/mobile_panda"
 CAMERAS = ("base_camera", "hand_camera")
-DEFAULT_PYTHON = {"maniskill": str(Path.home() / "anaconda3/envs/mshab/bin/python"),
-                  "mujoco": str(Path.home() / "anaconda3/envs/llm/bin/python")}
+CONDA_ROOTS = ("anaconda3", "miniconda3", "miniforge3")
+# Distribution name patterns, so that an editable install (ManiSkill from a checkout) is found too.
+BACKEND_PACKAGES = {"maniskill": ("mani*skill*", "python3.*"), "mujoco": ("mujoco-*", "python3.1[0-9]")}
+PREFERRED = {"maniskill": "mshab", "mujoco": "mplib-*"}
+
+
+def find_python(backend):
+    """Interpreter of a Conda environment that has the backend's simulator: `mshab` for ManiSkill, one that also
+    has mplib (the skills need it) for MuJoCo."""
+    package, version = BACKEND_PACKAGES[backend]
+    found = []
+    for root in CONDA_ROOTS:
+        for env in sorted((Path.home() / root / "envs").glob("*")):
+            sites = list(env.glob(f"lib/{version}/site-packages"))
+            if sites and any(sites[0].glob(package)):
+                found.append((env, sites[0]))
+    if not found:
+        raise RuntimeError(f"no Conda environment with {package} found; set sim_python or MOBILE_PANDA_SIM_PYTHON")
+    wanted = PREFERRED[backend]
+    best = max(found, key=lambda item: item[0].name == wanted or any(item[1].glob(wanted)))
+    return best[0] / "bin/python"
 
 
 class Bridge(Node):
@@ -35,9 +54,10 @@ class Bridge(Node):
         param = lambda name: self.get_parameter(name).value
         root = Path(param("project_root")).expanduser().resolve()
         backend = param("backend")
-        if backend not in DEFAULT_PYTHON:
-            raise RuntimeError(f"backend={backend} must be one of {sorted(DEFAULT_PYTHON)}")
-        python = Path(param("sim_python") or DEFAULT_PYTHON[backend]).expanduser()
+        if backend not in BACKEND_PACKAGES:
+            raise RuntimeError(f"backend={backend} must be one of {sorted(BACKEND_PACKAGES)}")
+        python = Path(param("sim_python")).expanduser() if param("sim_python") else find_python(backend)
+        self.get_logger().info(f"Simulation interpreter: {python}")
         if not (root / "mobile_panda_sim/ros2/worker.py").is_file():
             raise RuntimeError(f"project_root={root} is not the repository root (mobile_panda_sim/ missing)")
         if not python.is_file():
