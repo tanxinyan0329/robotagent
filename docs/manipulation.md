@@ -1,13 +1,13 @@
 # 传统方法操作技能：抓取、放置、开关抽屉和柜门
 
-代码在 `mobile_panda_sim/manipulation/`，不用训练，在 ManiSkill 和 MuJoCo 上是同一份：
+代码在 `mobile_panda_sim/manipulation/`，不用训练：
 
 | 文件 | 内容 |
 |---|---|
 | `pose.py` | 位姿运算，不依赖任何仿真器 |
-| `planner.py` | 运动规划层：基于 mplib（ManiSkill 自带）的逆运动学、避障路径（RRTConnect）、直线运动。障碍物是从场景碰撞体采样的点云；机械臂下面的立柱和底盘写进了规划用的机器人模型，算作自碰撞 |
+| `planner.py` | 运动规划层：基于 mplib 的逆运动学、避障路径（RRTConnect）、直线运动。障碍物是从场景碰撞体采样的点云；机械臂下面的立柱和底盘写进了规划用的机器人模型，算作自碰撞 |
 | `skills.py` | 技能层：`pick`、`place`、`open`、`close`、`home`，以及选底盘停靠位置的 `suggest_base_pose` |
-| `maniskill_world.py` | 技能需要的仿真接口（位姿、关节、步进、碰撞几何、射线、接触）的 ManiSkill 实现；MuJoCo 的实现是 `mj/world.py` |
+| `mj/world.py` | 技能需要的仿真接口：位姿、关节、步进、碰撞几何、射线、接触 |
 
 这些技能读取仿真里的真值（物体网格和位姿、把手位置、关节轴），是**参考实现**，不经过视觉。
 底盘必须先停好，技能执行时底盘速度保持为 0；开到哪里、怎么开过去由调用者（学生的导航技能）负责。
@@ -15,14 +15,13 @@
 ## 用法
 
 ```python
-import gymnasium as gym
-import mobile_panda_sim.scenes
 from mobile_panda_sim.manipulation.skills import ManipulationSkills
+from mobile_panda_sim.mj.sim import MujocoScene
+from mobile_panda_sim.mj.world import MujocoWorld
 
-env = gym.make("MobilePandaKitchen-v1", robot_uids="mobile_panda_wheels", start=(-2.95, -1.15, 3.1416),
-               obs_mode="none", control_mode="pd_joint_delta_pos", sim_backend="physx_cpu", reward_mode="none")
-env.reset(seed=0)
-skills = ManipulationSkills(env.unwrapped)
+scene = MujocoScene("wheels")
+scene.reset((-2.95, -1.15, 3.1416))         # 底盘停靠位 (x, y, yaw)
+skills = ManipulationSkills(MujocoWorld(scene))
 
 r = skills.pick("lemon")                    # 从上方抓起，抬高 12 cm
 r = skills.place((-3.38, -1.42))            # 放到 (x, y) 下方的台面上，松开，抬手
@@ -37,38 +36,17 @@ skills.open("fridge", "top_door_hinge")                  # 门默认开到 0.6 r
 
 关节名就是 `/mobile_panda/state` 里 `articulations` 下的名字。
 
-MuJoCo 上只有创建场景的部分不同（环境要求见 [mujoco.md](mujoco.md)）：
-
-```python
-from mobile_panda_sim.mj.sim import MujocoScene
-from mobile_panda_sim.mj.world import MujocoWorld
-
-scene = MujocoScene("kitchen", "wheels")
-scene.reset(0, (-2.95, -1.15, 3.1416))       # 第二个参数是底盘停靠位
-skills = ManipulationSkills(MujocoWorld(scene))
-```
-
 演示和回归测试：
 
 ```bash
-conda activate mshab
-python scripts/demo_manipulation.py drawer              # 台柜上层两个抽屉：开、关
-python scripts/demo_manipulation.py pickplace           # 玄关台上的糖盒、梨、柠檬：抓起、放到别处
-python scripts/demo_manipulation.py fridge --record outputs/fridge.mp4
-python scripts/demo_manipulation.py all --viewer        # 实时窗口；跑完不自动关闭，关窗口即退出
-python scripts/demo_manipulation.py all --repeat 3 --report outputs/manipulation.json
-
-python scripts/demo_manipulation.py all --backend mujoco --repeat 5    # MuJoCo 环境里运行，也可以加 --viewer
+.venv/bin/python scripts/demo_manipulation.py drawer              # 台柜上层两个抽屉：开、关
+.venv/bin/python scripts/demo_manipulation.py pickplace           # 玄关台上的糖盒、梨、柠檬：抓起、放到别处
+.venv/bin/python scripts/demo_manipulation.py fridge --record outputs/fridge.mp4
+.venv/bin/python scripts/demo_manipulation.py all --viewer        # 实时窗口；跑完不自动关闭，关窗口即退出
+.venv/bin/python scripts/demo_manipulation.py all --repeat 5 --report outputs/manipulation.json
 ```
 
 每一步除了看技能本身是否成功，还检查有没有碰动别的物体（位移超过 2 cm 记为失败）。
-
-带窗口运行时要把刷新函数同时传给 `on_idle`：规划一次抓取或拖动可能要算几秒，这期间仿真不步进；
-不在这时刷新窗口，拖动视角会卡住，系统还可能把窗口判定为"未响应"：
-
-```python
-sk = ManipulationSkills(w, on_step=w.render, on_idle=w.render)
-```
 
 ## 每个技能怎么做的
 
@@ -91,20 +69,18 @@ sk = ManipulationSkills(w, on_step=w.render, on_idle=w.render)
 3. **执行**：接近，闭合夹爪。用指间距检查是不是真的握住了横杆，而不是捏在边缘；没握住就换下一个候选。然后低速拖动。
 4. **够不着就重新抓**：如果拖到一半机械臂够不着了，就松手、重新抓，最多 3 次。
 
-## 实测（Ubuntu 22.04，physx_cpu / MuJoCo 3.5.0，2026-11-05，最终代码）
+## 实测
 
-下表是 `demo_manipulation.py all` 各跑 5 轮的结果，底盘停在表中的固定位置：
+Ubuntu 22.04，MuJoCo 3.5.0，`demo_manipulation.py all` 跑 5 轮，轮式底盘 90/90，所有步骤都没有碰动其他物体；平面底盘 2 轮 36/36：
 
-| 任务 | 底盘位置 (x, y, yaw) | ManiSkill | MuJoCo |
-|---|---|---|---|
-| 台柜中间上层抽屉：拉开 0.25 m、关上 | (-1.15, 1.83, 1.989) | 开 5/5，关 5/5 | 开 5/5，关 5/5 |
-| 台柜左侧上层抽屉：拉开、关上 | (-2.899, 1.86, 1.153) | 开 5/5，关 5/5 | 开 5/5，关 5/5 |
-| 玄关台：抓糖盒、梨、柠檬，各放到台面另一处 | (-2.95, -1.15, π) | 抓 13/15，放 15/15 | 抓 15/15，放 15/15 |
-| 冰箱上门：开到 0.6 rad、关上 | (0.249, 1.492, 1.107) | 开 5/5，关 5/5 | 开 5/5，关 5/5 |
+| 任务 | 底盘位置 (x, y, yaw) | 结果 |
+|---|---|---|
+| 台柜中间上层抽屉：拉开 0.25 m、关上 | (-1.15, 1.83, 1.989) | 开 5/5，关 5/5 |
+| 台柜左侧上层抽屉：拉开、关上 | (-2.899, 1.86, 1.153) | 开 5/5，关 5/5 |
+| 玄关台：抓糖盒、梨、柠檬，各放到台面另一处 | (-2.95, -1.15, π) | 抓 15/15，放 15/15 |
+| 冰箱上门：开到 0.6 rad、关上 | (0.249, 1.492, 1.107) | 开 5/5，关 5/5 |
 
-ManiSkill 抓取那 2 次失败，物品都抓起来了，只是碰动了饼干盒约 2.3 cm，略超过 2 cm 的门限。MuJoCo 的平面底盘也跑过 2 轮，36/36。每项只有 5 轮，两个后端之间的差别不能当成稳定性的结论；比如 ManiSkill 的冰箱门在另一组 6 轮里是开 6/6、关 5/6。
-
-更早的一次实验：冰箱上门先在 (0.249, 1.492, 1.107) 开到 0.6 rad，再换到 (0.31, 1.40, 1.45) 继续开，到了 1.20 rad，只在 ManiSkill 上试过 1 次。
+每项只有 5 轮，不代表长期成功率。
 
 失败时技能返回 `success=False` 并说明原因（够不着、没夹住、路径规划失败），不会卡住；`info["stages"]` 里有每次抓取的细节。
 
@@ -122,13 +98,13 @@ pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")
 
 用推荐位置各开关 4 次的结果：
 
-| 关节 | 搜索耗时 | 推荐位置 | MuJoCo | ManiSkill |
-|---|---|---|---|---|
-| 台柜中间上层抽屉 | 约 55 秒 | (-1.57, 1.81, 1.19) | 开 4/4，关 4/4 | 开 4/4，关 4/4 |
-| 台柜左侧上层抽屉 | 约 30 秒 | (-2.899, 1.79–1.81, 1.19–1.21) | 开 4/4，关 4/4 | 开 4/4，关 4/4 |
-| 冰箱上门 | 约 17 秒 | (0.558, 1.635, 1.571) | 开 4/4，关 4/4 | 开 4/4，**关 1/4** |
+| 关节 | 搜索耗时 | 推荐位置 | 结果 |
+|---|---|---|---|
+| 台柜中间上层抽屉 | 约 55 秒 | (-1.57, 1.81, 1.19) | 开 4/4，关 4/4 |
+| 台柜左侧上层抽屉 | 约 30 秒 | (-2.899, 1.79–1.81, 1.19–1.21) | 开 4/4，关 4/4 |
+| 冰箱上门 | 约 17 秒 | (0.558, 1.635, 1.571) | 开 4/4，关 4/4 |
 
-冰箱门在 ManiSkill 上关不好：这个函数是纯运动学估计，假设底盘不动，而在这个位置上门的反作用力会把底盘带动 2–4 cm，手臂随后就够不着了。需要开关冰箱门时，用上面表格里的固定位置。
+这个函数是纯运动学估计，假设底盘不动。
 
 ## 能用和不能用的
 
@@ -156,4 +132,4 @@ pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")
 - 用 `suggest_base_pose` 加上自己的导航，组成"走到柜子前、打开、取物"的完整流程。冰箱门开大角度需要换两次位置。
 - 用相机和抓取位姿模型（见 `skills/EXTERNAL_SKILLS.md`）替换真值位姿。
 - 把放置扩展成放进抽屉或冰箱，或者实现推门关门。
-- 用强化学习训练接触类动作，和这里的传统实现比成功率和耗时。
+- 用强化学习训练接触类动作，和这里的传统实现比成功率和耗时，见 [training/README.md](../training/README.md)。

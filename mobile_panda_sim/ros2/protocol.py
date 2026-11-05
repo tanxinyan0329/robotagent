@@ -41,9 +41,3 @@ def validate_command(command):
         if not math.isfinite(width) or not low - 1e-12 <= width <= high + 1e-12:
             raise ValueError(f"gripper target must be within [{low}, {high}] m per finger")
     return command
-
-
-def gripper_action(width):
-    """Finger target (m) -> ManiSkill's normalized gripper action in [-1, 1]."""
-    low, high = GRIPPER_RANGE
-    return 2.0 * (float(width) - low) / (high - low) - 1.0

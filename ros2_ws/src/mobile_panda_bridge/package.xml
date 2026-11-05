@@ -2,7 +2,7 @@
 <package format="3">
   <name>mobile_panda_bridge</name>
   <version>0.1.0</version>
-  <description>ROS2 bridge for the ManiSkill mobile Panda simulation (scene loading, control and sensor topics).</description>
+  <description>ROS2 bridge for the MuJoCo mobile Panda simulation (scene loading, control and sensor topics).</description>
   <maintainer email="tanxinyan@bit.edu.cn">moss</maintainer>
   <license>Apache-2.0</license>
   <exec_depend>rclpy</exec_depend>

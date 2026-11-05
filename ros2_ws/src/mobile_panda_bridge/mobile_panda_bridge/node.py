@@ -1,4 +1,4 @@
-"""ROS-facing process; runs on system Python and never imports Torch/SAPIEN."""
+"""ROS-facing process; runs on system Python and never imports MuJoCo."""
 import base64
 import json
 import os
@@ -20,47 +20,39 @@ from tf2_ros import TransformBroadcaster
 NS = "/mobile_panda"
 CAMERAS = ("base_camera", "hand_camera")
 CONDA_ROOTS = ("anaconda3", "miniconda3", "miniforge3")
-# Patterns, so that an editable ManiSkill install is found too.
-BACKEND_PACKAGES = {"maniskill": ("mani*skill*", "python3.*"), "mujoco": ("mujoco-*", "python3.1[0-9]")}
-PREFERRED = {"maniskill": "mshab", "mujoco": "mplib-*"}
 
 
-def find_python(backend):
-    """Interpreter of a Conda environment with the backend's simulator, preferring `mshab` or one that has mplib."""
-    package, version = BACKEND_PACKAGES[backend]
+def find_python(root):
+    """The repository's .venv, or else a Conda environment with mujoco, preferring one that also has mplib."""
+    venv = root / ".venv/bin/python"
+    if venv.is_file():
+        return venv
     found = []
-    for root in CONDA_ROOTS:
-        for env in sorted((Path.home() / root / "envs").glob("*")):
-            sites = list(env.glob(f"lib/{version}/site-packages"))
-            if sites and any(sites[0].glob(package)):
-                found.append((env, sites[0]))
+    for conda in CONDA_ROOTS:
+        for env in sorted((Path.home() / conda / "envs").glob("*")):
+            found += [(env, site) for site in env.glob("lib/python3.1[0-9]/site-packages") if any(site.glob("mujoco-*"))]
     if not found:
-        raise RuntimeError(f"no Conda environment with {package} found; set sim_python or MOBILE_PANDA_SIM_PYTHON")
-    wanted = PREFERRED[backend]
-    best = max(found, key=lambda item: item[0].name == wanted or any(item[1].glob(wanted)))
-    return best[0] / "bin/python"
+        raise RuntimeError("no Python with mujoco found; create .venv (see README) or set sim_python")
+    return max(found, key=lambda item: any(item[1].glob("mplib-*")))[0] / "bin/python"
 
 
 class Bridge(Node):
     def __init__(self):
         super().__init__("mobile_panda_bridge")
         defaults = {"project_root": os.environ.get("MOBILE_PANDA_ROOT", str(Path.cwd())),
-                    "sim_python": os.environ.get("MOBILE_PANDA_SIM_PYTHON", ""), "backend": "maniskill",
-                    "scene": "kitchen", "base": "wheels", "seed": 0, "viewer": True,
+                    "sim_python": os.environ.get("MOBILE_PANDA_SIM_PYTHON", ""),
+                    "base": "wheels", "viewer": True,
                     "start_x": float("nan"), "start_y": float("nan"), "start_yaw": float("nan")}
         for name, value in defaults.items():
             self.declare_parameter(name, value)
         param = lambda name: self.get_parameter(name).value
         root = Path(param("project_root")).expanduser().resolve()
-        backend = param("backend")
-        if backend not in BACKEND_PACKAGES:
-            raise RuntimeError(f"backend={backend} must be one of {sorted(BACKEND_PACKAGES)}")
-        python = Path(param("sim_python")).expanduser() if param("sim_python") else find_python(backend)
+        python = Path(param("sim_python")).expanduser() if param("sim_python") else find_python(root)
         self.get_logger().info(f"Simulation interpreter: {python}")
         if not (root / "mobile_panda_sim/ros2/worker.py").is_file():
             raise RuntimeError(f"project_root={root} is not the repository root (mobile_panda_sim/ missing)")
         if not python.is_file():
-            raise RuntimeError(f"sim_python={python} not found; set it to the interpreter with the {backend} packages")
+            raise RuntimeError(f"sim_python={python} not found; set it to an interpreter with mujoco")
 
         sticky = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.state_pub = self.create_publisher(String, f"{NS}/state", sticky)
@@ -85,8 +77,7 @@ class Bridge(Node):
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env["PYTHONPATH"] = str(root)
-        args = [str(python), "-u", "-m", "mobile_panda_sim.ros2.worker", "--backend", backend, "--scene", param("scene"),
-                "--base", param("base"), "--seed", str(param("seed"))]
+        args = [str(python), "-u", "-m", "mobile_panda_sim.ros2.worker", "--base", param("base")]
         start = [param("start_x"), param("start_y"), param("start_yaw")]
         if not any(v != v for v in start):
             args += ["--start", *map(str, start)]

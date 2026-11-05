@@ -1,4 +1,4 @@
-"""Kitchen for the MuJoCo backend, built from the export of scripts/export_kitchen_mujoco.py."""
+"""The home scene (kitchen, dining room, living room), built from assets/mujoco_kitchen."""
 from dataclasses import dataclass, field
 import json
 import math
@@ -6,7 +6,7 @@ import math
 import mujoco
 import numpy as np
 
-from ..paths import MUJOCO_KITCHEN
+from ..paths import KITCHEN
 
 STATIC, ARTICULATED = (1, 1), (2, 1)   # (contype, conaffinity); articulated links skip each other
 CAPSULE_X_TO_Z = (math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0)
@@ -42,10 +42,7 @@ class KitchenScene:
 
     @classmethod
     def load(cls):
-        path = MUJOCO_KITCHEN / "scene.json"
-        if not path.is_file():
-            raise FileNotFoundError(f"{path} missing; run scripts/export_kitchen_mujoco.py in the mshab environment")
-        return cls(json.loads(path.read_text(encoding="utf-8")), np.load(MUJOCO_KITCHEN / "meshes.npz"))
+        return cls(json.loads((KITCHEN / "scene.json").read_text(encoding="utf-8")), np.load(KITCHEN / "meshes.npz"))
 
     @property
     def start(self):
@@ -91,7 +88,7 @@ class KitchenScene:
                 if texture not in self.added:
                     self.added.add(texture)
                     spec.add_texture(name=f"t_{texture}", type=mujoco.mjtTexture.mjTEXTURE_2D,
-                                     file=str(MUJOCO_KITCHEN / "textures" / f"{texture}.png"))
+                                     file=str(KITCHEN / "textures" / f"{texture}.png"))
                 material.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = f"t_{texture}"
         return name
 
@@ -133,6 +130,16 @@ class KitchenScene:
         self.add_body_geoms(spec, body, link, ARTICULATED)
         for child in children.get(link["name"], []):
             self.add_link(spec, body, link, child, children)
+
+    def add_subset(self, spec, names):
+        """Only the actors `names`, without visuals or lights: the fast model used for training."""
+        for actor in self.data["actors"]:
+            if actor["name"] in names:
+                body = spec.worldbody.add_body(name=actor["name"], pos=actor["pos"], quat=actor["quat"])
+                if actor["movable"]:
+                    body.add_joint(name=actor["name"], type=mujoco.mjtJoint.mjJNT_FREE, damping=PROP_DAMPING)
+                    set_inertia(body, actor)
+                self.add_body_geoms(spec, body, {**actor, "visual": []}, STATIC)
 
     def add_to(self, spec):
         world = spec.worldbody

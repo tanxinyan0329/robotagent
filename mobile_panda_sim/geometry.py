@@ -16,25 +16,6 @@ HAND_CAMERA_XYZ = (0.0, 0.02, 0.0115)
 HAND_CAMERA_SIZE = (320, 240)
 CAMERA_FOV_Y = 1.0
 
-TABLE_CENTER = (0.35, 0.0)
-TABLE_HALF = (0.55, 0.60)
-TABLE_LEGS = ((0.0, -0.5), (0.0, 0.5), (0.75, -0.5), (0.75, 0.5))
-TABLE_LEG_HALF = 0.035
-CUBE_HALF = 0.02
-CUBES = {"red_cube": (0.0, -0.08), "blue_cube": (0.0, 0.0)}
-ZONES = {"green_zone": (0.0, 0.12), "yellow_zone": (0.0, -0.16)}
-ZONE_HALF = 0.065
-DEFAULT_START = (-1.15, -0.30, 0.0)
-
 MAX_LINEAR, MAX_ANGULAR = 0.25, 0.7
 MAX_JOINT_DELTA = 0.1
 GRIPPER_RANGE = (-0.01, 0.04)
-
-
-def tabletop_layout(start, robot):
-    """Static tabletop scene description (world frame, metres)."""
-    return dict(scene="tabletop", frame="map", floor_z=-HEIGHT, table_top_z=0.0,
-                table=dict(center=list(TABLE_CENTER), half_extents=list(TABLE_HALF)),
-                table_legs=[list(p) for p in TABLE_LEGS], table_leg_half=TABLE_LEG_HALF,
-                zones={name: dict(center=list(xy), half_extent=ZONE_HALF) for name, xy in ZONES.items()},
-                cube_half=CUBE_HALF, start=list(start), robot=robot)

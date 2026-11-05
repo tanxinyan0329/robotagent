@@ -1,5 +1,0 @@
-# MuJoCo backend and the skills on it. Python 3.10+.
-mujoco==3.5.0
-mplib==0.1.1
-numpy<2
-torch

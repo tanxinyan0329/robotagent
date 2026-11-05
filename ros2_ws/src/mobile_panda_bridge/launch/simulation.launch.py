@@ -12,13 +12,10 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 ARGS = {
     "project_root": (os.environ.get("MOBILE_PANDA_ROOT", os.getcwd()), str, "repository root (contains mobile_panda_sim/)"),
-    "backend": ("maniskill", str, "simulator: maniskill or mujoco"),
     "sim_python": (os.environ.get("MOBILE_PANDA_SIM_PYTHON", ""), str,
-                   "interpreter with the backend's packages; empty = find a Conda environment that has them"),
-    "scene": ("kitchen", str, "kitchen (home: kitchen + dining + living room) or tabletop (skill-test table)"),
+                   "interpreter with mujoco; empty = the repository's .venv, or a Conda environment with mujoco"),
     "base": ("wheels", str, "wheels (physical differential drive) or planar (virtual x/y/yaw joints)"),
-    "seed": ("0", int, "episode seed (red cube yaw)"),
-    "viewer": ("true", bool, "open the simulator's viewer window"),
+    "viewer": ("true", bool, "open the MuJoCo viewer window"),
     "start_x": ("nan", float, "initial chassis x in map (m); nan = scene default"),
     "start_y": ("nan", float, "initial chassis y in map (m); nan = scene default"),
     "start_yaw": ("nan", float, "initial chassis yaw (rad); nan = scene default"),
@@ -29,8 +26,6 @@ def nodes(context):
     base = LaunchConfiguration("base").perform(context)
     if base not in ("wheels", "planar"):
         raise RuntimeError("base must be wheels or planar")
-    if LaunchConfiguration("scene").perform(context) not in ("kitchen", "tabletop"):
-        raise RuntimeError("scene must be kitchen or tabletop")
     urdf = Path(get_package_share_directory("mobile_panda_description")) / f"urdf/mobile_panda_{base}.urdf"
     rviz_config = Path(get_package_share_directory("mobile_panda_bridge")) / "rviz/mobile_panda.rviz"
     parameters = {name: ParameterValue(LaunchConfiguration(name), value_type=kind) for name, (_, kind, _) in ARGS.items()}

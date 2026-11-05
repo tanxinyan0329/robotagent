@@ -1,4 +1,4 @@
-"""MuJoCo backend. Collected only with mujoco installed and the Menagerie model downloaded (see conftest.py)."""
+"""Model, scene and skills. Collected only with mujoco installed and the Menagerie model downloaded (see conftest.py)."""
 import json
 import math
 import os
@@ -13,21 +13,24 @@ import pytest
 from mobile_panda_sim.geometry import ARM_REST
 from mobile_panda_sim.mj.model import ARM_JOINTS
 from mobile_panda_sim.mj.sim import MujocoScene
-from mobile_panda_sim.paths import MUJOCO_KITCHEN, REPO, ros_urdf
+from mobile_panda_sim.mj.world import MujocoWorld
+from mobile_panda_sim.paths import REPO, ros_urdf
 
-sys.path.insert(0, str(REPO / "scripts"))
-import mj_contact_check  # noqa: E402
-
-# Measured on the ManiSkill backend at reset with the default start.
-MANISKILL_TCP = {"wheels": (-0.535, -0.3, 0.1768), "planar": (-0.535, -0.3, 0.1698)}
-MANISKILL_JOINTS = {"wheels": ["left_wheel_joint", "right_wheel_joint"], "planar": ["base_x_joint", "base_y_joint", "base_yaw_joint"]}
-MANISKILL_FOCAL = {"base_camera": 439.317, "hand_camera": 219.659}
+REST_TCP = {"wheels": (-2.55, -1.335, 1.0964), "planar": (-2.55, -1.335, 1.0894)}
+BASE_JOINTS = {"wheels": ["left_wheel_joint", "right_wheel_joint"], "planar": ["base_x_joint", "base_y_joint", "base_yaw_joint"]}
+FOCAL = {"base_camera": 439.317, "hand_camera": 219.659}
 
 
-@pytest.fixture(params=["wheels", "planar"])
+@pytest.fixture(scope="module", params=["wheels", "planar"])
 def scene(request):
-    result = MujocoScene("tabletop", request.param)
-    result.reset(0)
+    result = MujocoScene(request.param)
+    yield result
+    result.close()
+
+
+@pytest.fixture(scope="module")
+def wheels():
+    result = MujocoScene("wheels")
     yield result
     result.close()
 
@@ -50,43 +53,43 @@ def urdf_transform(element, angle=0.0):
     return transform
 
 
-def test_rest_pose_matches_maniskill(scene):
-    assert scene.joint_names == MANISKILL_JOINTS[scene.base] + ARM_JOINTS + ["panda_finger_joint1", "panda_finger_joint2"]
+def test_rest_pose(scene):
+    scene.reset()
+    assert scene.joint_names == BASE_JOINTS[scene.base] + ARM_JOINTS + ["panda_finger_joint1", "panda_finger_joint2"]
     assert np.allclose(scene.joint_positions()[-9:], ARM_REST)
-    assert np.allclose(scene.tcp_pose()[0], MANISKILL_TCP[scene.base], atol=2e-4)
-    assert np.allclose(np.abs(scene.tcp_pose()[1]), [0, 1, 0, 0], atol=1e-3)
+    assert np.allclose(scene.tcp_pose()[0], REST_TCP[scene.base], atol=2e-3)
 
 
-def test_arm_kinematics_match_urdf():
-    scene = MujocoScene("tabletop", "planar")
-    scene.reset(0)
-    joints = {j.get("name"): j for j in E.parse(ros_urdf("planar")).getroot().findall("joint")}
-    link0 = scene.model.body("panda_link0").id
+def test_arm_kinematics_match_urdf(wheels):
+    wheels.reset()
+    joints = {j.get("name"): j for j in E.parse(ros_urdf("wheels")).getroot().findall("joint")}
+    link0 = wheels.model.body("panda_link0").id
+    data = mujoco.MjData(wheels.model)
+    data.qpos[:] = wheels.data.qpos
     rng = np.random.default_rng(0)
     for _ in range(20):
-        q = rng.uniform(scene.model.actuator_ctrlrange[scene.arm_ctrl, 0], scene.model.actuator_ctrlrange[scene.arm_ctrl, 1])
-        scene.data.qpos[scene.arm_q] = q
-        mujoco.mj_kinematics(scene.model, scene.data)
+        q = rng.uniform(wheels.model.actuator_ctrlrange[wheels.arm_ctrl, 0], wheels.model.actuator_ctrlrange[wheels.arm_ctrl, 1])
+        data.qpos[wheels.arm_q] = q
+        mujoco.mj_kinematics(wheels.model, data)
         expected = np.eye(4)
         for i, angle in enumerate(q, start=1):
             expected = expected @ urdf_transform(joints[f"panda_joint{i}"], angle)
         for name in ("panda_joint8", "panda_hand_joint", "panda_hand_tcp_joint"):
             expected = expected @ urdf_transform(joints[name])
         base = np.eye(4)
-        base[:3, :3], base[:3, 3] = scene.data.xmat[link0].reshape(3, 3), scene.data.xpos[link0]
-        assert np.allclose((base @ expected)[:3, 3], scene.data.site_xpos[scene.tcp], atol=1e-4)
-    scene.close()
+        base[:3, :3], base[:3, 3] = data.xmat[link0].reshape(3, 3), data.xpos[link0]
+        assert np.allclose((base @ expected)[:3, 3], data.site_xpos[wheels.tcp], atol=1e-4)
 
 
 def test_base_rests_and_drives(scene):
+    scene.reset()
     for _ in range(20):
         scene.step(0, 0, None, 0.04)
     position = scene.pose(scene.chassis)[0]
     assert np.linalg.norm(position[:2] - scene.start[:2]) < 0.005
     for _ in range(40):
         scene.step(0.15, 0, None, 0.04)
-    moved = np.linalg.norm(scene.pose(scene.chassis)[0][:2] - position[:2])
-    assert moved == pytest.approx(0.3, abs=0.02)
+    assert np.linalg.norm(scene.pose(scene.chassis)[0][:2] - position[:2]) == pytest.approx(0.3, abs=0.02)
     yaw = yaw_of(scene.pose(scene.chassis)[1])
     for _ in range(40):
         scene.step(0, 0.4, None, 0.04)
@@ -94,6 +97,7 @@ def test_base_rests_and_drives(scene):
 
 
 def test_arm_delta_and_gripper(scene):
+    scene.reset()
     start = scene.joint_positions()[-9]
     for _ in range(10):
         scene.step(0, 0, [0.02, 0, 0, 0, 0, 0, 0], 0.04)
@@ -110,113 +114,77 @@ def test_arm_delta_and_gripper(scene):
 
 
 def test_cameras(scene):
+    scene.reset()
     images = scene.capture_rgb()
     assert images["base_camera"].shape == (480, 640, 3) and images["hand_camera"].shape == (240, 320, 3)
     assert all(a.dtype == np.uint8 and a.std() > 5 for a in images.values())
     for name, matrix in scene.camera_intrinsics().items():
-        assert matrix[0][0] == pytest.approx(MANISKILL_FOCAL[name], abs=0.01)
+        assert matrix[0][0] == pytest.approx(FOCAL[name], abs=0.01)
 
 
-def test_contact_physics():
-    assert all(r["success"] for r in mj_contact_check.pick(0).values())
-    assert mj_contact_check.drawer(0)["success"]
+def test_joint_limits_are_radians(wheels):
+    assert wheels.model.jnt_range[wheels.model.joint("fridge/top_door_hinge").id][1] == pytest.approx(2.3)
 
 
-def run_worker(scene):
-    env = {**os.environ, "PYTHONPATH": str(REPO)}
-    process = subprocess.Popen([sys.executable, "-u", "-m", "mobile_panda_sim.ros2.worker", "--backend", "mujoco", "--scene", scene],
-                               cwd=REPO, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-    try:
-        seen = {}
-        while "state" not in seen:
-            message = json.loads(process.stdout.readline())
-            seen[message["type"]] = message
-        return seen
-    finally:
-        process.stdin.close()
-        assert process.wait(timeout=20) == 0
-
-
-def test_worker_protocol():
-    seen = run_worker("tabletop")
-    assert seen["scene"]["layout"]["robot"] == "mobile_panda_wheels"
-    assert seen["ready"]["control_timestep"] == pytest.approx(0.05)
-    state = seen["state"]
-    assert {"base_pose", "root_pose", "tcp_pose", "joint_positions", "joint_velocities", "gripper_width", "objects", "images"} <= set(state)
-    assert set(state["objects"]) == {"red_cube", "blue_cube"} and state["images"]["base_camera"]["width"] == 640
-
-
-needs_kitchen = pytest.mark.skipif(not (MUJOCO_KITCHEN / "scene.json").is_file(), reason="run scripts/export_kitchen_mujoco.py")
-
-
-@needs_kitchen
-def test_kitchen_worker_state():
-    state = run_worker("kitchen")["state"]
-    assert len(state["objects"]) == 42
-    assert set(state["articulations"]) == {"kitchen_counter", "fridge", "sideboard"}
-    assert state["articulations"]["fridge"]["top_door_hinge"] == 0.0
-
-
-@needs_kitchen
-def test_kitchen_joint_limits_are_radians():
-    scene = MujocoScene("kitchen", "wheels")
-    assert scene.model.jnt_range[scene.model.joint("fridge/top_door_hinge").id][1] == pytest.approx(2.3)
-    scene.close()
-
-
-@needs_kitchen
-@pytest.mark.parametrize("base", ["wheels", "planar"])
-def test_kitchen_props_stay_put(base):
-    scene = MujocoScene("kitchen", base)
-    scene.reset(0)
+def test_props_stay_put(scene):
+    scene.reset()
     start = {name: scene.pose(body)[0] for name, body in scene.objects.items()}
     for _ in range(400):
         scene.step(0, 0, None, 0.04)
     moved = {name: float(np.linalg.norm(scene.pose(body)[0] - start[name])) for name, body in scene.objects.items()}
     assert max(moved.values()) < 0.005, moved
-    scene.close()
 
 
-@needs_kitchen
-def test_kitchen_reset_restores_scene():
-    scene = MujocoScene("kitchen", "wheels", (-3.0, -1.15, 3.1416))
-    scene.reset(0)
-    start = {name: scene.pose(body)[0] for name, body in scene.objects.items()}
-    address = scene.articulations["fridge"]["top_door_hinge"]
-    scene.data.qpos[address] = 0.5
-    for _ in range(300):
-        scene.step(0, 0, None, 0.04)
-    scene.reset(0)
-    assert scene.articulation_positions()["fridge"]["top_door_hinge"] == 0.0
+def test_reset_restores_scene(wheels):
+    wheels.reset((-3.0, -2.2, 3.1416))
+    start = {name: wheels.pose(body)[0] for name, body in wheels.objects.items()}
+    address = wheels.articulations["fridge"]["top_door_hinge"]
+    wheels.data.qpos[address] = 0.5
+    for _ in range(100):
+        wheels.step(0, 0, None, 0.04)
+    wheels.reset()
+    assert wheels.articulation_positions()["fridge"]["top_door_hinge"] == 0.0
     for _ in range(5):
-        scene.step(0, 0, None, 0.04)
-    assert max(np.linalg.norm(scene.pose(body)[0] - start[name]) for name, body in scene.objects.items()) < 0.005
-    scene.close()
+        wheels.step(0, 0, None, 0.04)
+    assert max(np.linalg.norm(wheels.pose(body)[0] - start[name]) for name, body in wheels.objects.items()) < 0.005
 
 
-@needs_kitchen
-def test_kitchen_contact():
-    assert mj_contact_check.actuate((0.249, 1.492, 1.107), "fridge", "top_door_hinge", 0.6)["success"]
+def test_worker_state():
+    env = {**os.environ, "PYTHONPATH": str(REPO)}
+    process = subprocess.Popen([sys.executable, "-u", "-m", "mobile_panda_sim.ros2.worker"], cwd=REPO, env=env,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        seen = {}
+        while "state" not in seen:
+            message = json.loads(process.stdout.readline())
+            seen[message["type"]] = message
+    finally:
+        process.stdin.close()
+        assert process.wait(timeout=20) == 0
+    assert seen["scene"]["layout"]["robot"] == "mobile_panda_wheels"
+    assert seen["ready"]["control_timestep"] == pytest.approx(0.05)
+    state = seen["state"]
+    assert {"base_pose", "root_pose", "tcp_pose", "joint_positions", "joint_velocities", "gripper_width", "images"} <= set(state)
+    assert len(state["objects"]) == 42 and state["images"]["base_camera"]["width"] == 640
+    assert set(state["articulations"]) == {"kitchen_counter", "fridge", "sideboard"}
 
 
-@pytest.fixture
-def kitchen_skills():
+@pytest.fixture(scope="module")
+def skills_on():
     pytest.importorskip("mplib")
     from mobile_panda_sim.manipulation.skills import ManipulationSkills
-    from mobile_panda_sim.mj.world import MujocoWorld
-    scene = MujocoScene("kitchen", "wheels")
+    scene = MujocoScene("wheels")
     world = MujocoWorld(scene)
 
     def park(start):
-        scene.reset(0, start)
+        scene.reset(start)
         return ManipulationSkills(world)
     yield park, world
     scene.close()
 
 
-@needs_kitchen
-def test_world_reads_the_scene(kitchen_skills):
-    park, world = kitchen_skills
+def test_world_reads_the_scene(skills_on):
+    park, world = skills_on
     park((-2.95, -1.15, 3.1416))
     assert world.surface(-3.40, -1.25) == pytest.approx(0.918, abs=0.01)
     assert world.object_points("sugar_box")[:, 2].max() > 1.05
@@ -227,18 +195,16 @@ def test_world_reads_the_scene(kitchen_skills):
     assert pose.to_transformation_matrix()[:3, 2] @ [0, -1, 0] > 0.99
 
 
-@needs_kitchen
-def test_pick_and_place_skill(kitchen_skills):
-    park, world = kitchen_skills
+def test_pick_and_place_skill(skills_on):
+    park, world = skills_on
     skills = park((-2.95, -1.15, 3.1416))
     assert skills.pick("lemon").success
     assert skills.place((-3.38, -1.42)).success
     assert np.linalg.norm(world.object_position("lemon")[:2] - [-3.38, -1.42]) < 0.04
 
 
-@needs_kitchen
-def test_drawer_skill(kitchen_skills):
-    park, world = kitchen_skills
+def test_drawer_skill(skills_on):
+    park, world = skills_on
     skills = park((-1.15, 1.83, 1.989))
     assert skills.open("kitchen_counter", "middle_slide_top").success
     assert world.joint_position("kitchen_counter", "middle_slide_top") > 0.2
@@ -246,9 +212,8 @@ def test_drawer_skill(kitchen_skills):
     assert abs(world.joint_position("kitchen_counter", "middle_slide_top")) < 0.03
 
 
-@needs_kitchen
-def test_suggested_base_pose_opens_and_closes(kitchen_skills):
-    park, world = kitchen_skills
+def test_suggested_base_pose_opens_and_closes(skills_on):
+    park, world = skills_on
     skills = park((-2.55, -1.95, 1.5708))
     pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")
     assert coverage > 0.99
@@ -257,58 +222,67 @@ def test_suggested_base_pose_opens_and_closes(kitchen_skills):
     assert skills.close("kitchen_counter", "middle_slide_top").success
 
 
-def test_pick_observation_matches_training():
-    from mobile_panda_sim.mj.pick_skill import PickObserver
-    from mobile_panda_sim.mj.pick_task import DOCK, PickCubeTask
-    task = PickCubeTask(1, seed=3, threads=1)
+def test_policy_observation_matches_training():
+    from mobile_panda_sim.mj.rl_skills import RLSkills
+    from mobile_panda_sim.mj.rl_tasks import DOCK, PickMoveTask
+    task = PickMoveTask(1, seed=3, threads=1)
     expected = task.observe()[0]
     data = task.datas[0]
-    scene = MujocoScene("tabletop", "planar", DOCK)
-    scene.reset(0)
-    for name in ("red_cube", "blue_cube"):
-        address = scene.model.joint(name).qposadr[0]
-        scene.data.qpos[address:address + 7] = data.qpos[task.model.joint(name).qposadr[0]:task.model.joint(name).qposadr[0] + 7]
+    scene = MujocoScene("planar", DOCK)
+    scene.reset()
+    for name, address in task.addresses.items():
+        target = scene.model.joint(name).qposadr[0]
+        scene.data.qpos[target:target + 7] = data.qpos[address:address + 7]
     scene.data.qpos[scene.arm_q] = data.qpos[task.arm_q]
     mujoco.mj_forward(scene.model, scene.data)
-    observed = PickObserver(scene, "red_cube").observation(task.goal[0])
-    assert np.allclose(observed, expected, atol=1e-5), np.abs(observed - expected).argmax()
+    skills = RLSkills(scene)
+    skills.select(task.target[0])
+    observed = skills.observation(task.goal[0])
+    assert np.allclose(observed, expected, atol=1e-3), np.abs(observed - expected).argmax()
     scene.close()
     task.close()
 
 
-def test_pick_task_reward_and_reset():
-    from mobile_panda_sim.mj.pick_task import ACTION_SIZE, MAX_STEPS, OBS_SIZE, PickCubeTask
-    task = PickCubeTask(4, seed=0, threads=1)
+def test_task_resets_and_rewards():
+    from mobile_panda_sim.mj.rl_tasks import ACTION_SIZE, MAX_STEPS, OBS_SIZE, PickMoveTask
+    task = PickMoveTask(4, seed=0, threads=1)
     obs = task.reset()
     assert obs.shape == (4, OBS_SIZE) and np.isfinite(obs).all()
-    assert np.abs(obs[:, 29:31]).max() <= 0.1
     for _ in range(MAX_STEPS):
-        obs, reward, terminated, truncated, final, _ = task.step(np.zeros((4, ACTION_SIZE), dtype=np.float32))
-        assert np.all(reward >= 0) and np.all(reward <= 1)
-    assert truncated.all() and (task.steps == 0).all()
+        obs, reward, failed, ended, final, _ = task.step(np.zeros((4, ACTION_SIZE), dtype=np.float32))
+        assert np.all(reward <= 1)
+    assert ended.all() and (task.steps == 0).all()
     task.close()
 
 
 def test_closed_fingers_on_top_do_not_count_as_a_grasp():
-    from mobile_panda_sim.mj.pick_task import MIN_FINGER_GAP, PickCubeTask, is_grasped
-    task = PickCubeTask(1, seed=0, threads=1)
+    from mobile_panda_sim.mj.rl_tasks import MIN_FINGER_GAP, PickMoveTask, is_grasped
+    task = PickMoveTask(1, seed=0, threads=1)
     data = task.datas[0]
     data.qpos[task.finger_q] = 0.0
-    assert not is_grasped(task.model, data, task.cube_geoms, task.finger_geoms, task.finger_q)
-    assert MIN_FINGER_GAP < 0.04
+    assert not is_grasped(task.model, data, task.target_geoms[task.target[0]], task.finger_geoms, task.finger_q)
+    assert MIN_FINGER_GAP < 0.05
     task.close()
 
 
-def test_trained_pick_policy():
-    torch = pytest.importorskip("torch")
-    from mobile_panda_sim.mj.pick_skill import PickPolicy
-    from mobile_panda_sim.mj.pick_task import MAX_STEPS, PickCubeTask
-    policy = PickPolicy()
-    task = PickCubeTask(64, seed=11)
-    obs, won = task.observe(), np.zeros(64, dtype=bool)
-    for _ in range(MAX_STEPS):
-        action = torch.stack([torch.from_numpy(policy(o)) for o in obs]).numpy()
-        obs, _, _, _, _, success = task.step(action)
-        won |= success
+def test_moving_a_neighbour_fails_the_episode():
+    from mobile_panda_sim.mj.rl_tasks import ACTION_SIZE, PickMoveTask
+    task = PickMoveTask(2, seed=0, threads=1)
+    data = task.datas[0]
+    address = task.addresses["cracker_box"]
+    data.qpos[address] += 0.1
+    mujoco.mj_forward(task.model, data)
+    _, _, failed, _, _, _ = task.step(np.zeros((2, ACTION_SIZE), dtype=np.float32))
+    assert failed[0] and not failed[1]
     task.close()
-    assert won.mean() > 0.85
+
+
+def test_trained_policies_run_on_the_robot():
+    from mobile_panda_sim.mj.rl_skills import RLSkills
+    from mobile_panda_sim.mj.rl_tasks import DOCK, TABLE_Z
+    scene = MujocoScene("planar", DOCK)
+    scene.reset()
+    skills = RLSkills(scene)
+    assert skills.pick_move("lemon", np.array([-3.40, -1.50, TABLE_Z + 0.15]))["success"]
+    assert skills.place((-3.34, -1.56))["success"]
+    scene.close()

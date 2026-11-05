@@ -1,4 +1,4 @@
-"""MuJoCo physics and rendering for one scene; same control conventions as the ManiSkill backend."""
+"""MuJoCo physics and rendering of the home scene."""
 import os
 
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -6,9 +6,9 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 import mujoco  # noqa: E402
 import numpy as np  # noqa: E402
 
-from ..geometry import BASE_CAMERA_SIZE, CAMERA_FOV_Y, CUBE_HALF, CUBES, DEFAULT_START, HAND_CAMERA_SIZE, HEIGHT, RADIUS, TRACK, tabletop_layout  # noqa: E402
+from ..geometry import BASE_CAMERA_SIZE, CAMERA_FOV_Y, HAND_CAMERA_SIZE, RADIUS, TRACK  # noqa: E402
 from .kitchen import KitchenScene  # noqa: E402
-from .model import ARM_JOINTS, CONTROL_SUBSTEPS, FINGER_JOINTS, REST_POSITIONS, TIMESTEP, add_tabletop, build, yaw_quat  # noqa: E402
+from .model import ARM_JOINTS, CONTROL_SUBSTEPS, FINGER_JOINTS, REST_POSITIONS, TIMESTEP, build, yaw_quat  # noqa: E402
 
 BASE_JOINTS = {"wheels": ["left_wheel_joint", "right_wheel_joint"], "planar": ["base_x_joint", "base_y_joint", "base_yaw_joint"]}
 SETTLE_STEPS, SETTLE_DAMPING = 1500, 0.9
@@ -18,13 +18,11 @@ CAMERAS = {"base_camera": BASE_CAMERA_SIZE, "hand_camera": HAND_CAMERA_SIZE}
 class MujocoScene:
     control_timestep = TIMESTEP * CONTROL_SUBSTEPS
 
-    def __init__(self, scene="tabletop", base="wheels", start=None, viewer=False, extend=None):
-        self.scene, self.base = scene, base
-        self.kitchen = KitchenScene.load() if scene == "kitchen" else None
-        default = self.kitchen.start if self.kitchen else DEFAULT_START
-        self.start = tuple(float(v) for v in (start if start is not None else default))
-        add_scene, floor_z = (self.kitchen.add_to, 0.0) if self.kitchen else (add_tabletop, -HEIGHT)
-        self.model, self.spec = build(add_scene, floor_z, base, self.start, extend)
+    def __init__(self, base="wheels", start=None, viewer=False, extend=None):
+        self.base = base
+        self.kitchen = KitchenScene.load()
+        self.start = tuple(float(v) for v in (start if start is not None else self.kitchen.start))
+        self.model, self.spec = build(self.kitchen.add_to, base, self.start, extend)
         self.data = mujoco.MjData(self.model)
         self.joint_names = BASE_JOINTS[base] + ARM_JOINTS + FINGER_JOINTS
         self.qpos_index = [self.model.joint(n).qposadr[0] for n in self.joint_names]
@@ -36,18 +34,18 @@ class MujocoScene:
         self.chassis = self.model.body("chassis_link").id
         self.root = self.model.body("chassis_link" if base == "wheels" else "world_root").id
         self.tcp = self.model.site("tcp").id
-        self.objects = {name: self.model.body(name).id for name in (self.kitchen.movable if self.kitchen else CUBES)}
+        self.objects = {name: self.model.body(name).id for name in self.kitchen.movable}
         self.articulations = {name: {joint: self.model.joint(f"{name}/{joint}").qposadr[0] for joint in joints}
-                              for name, joints in self.kitchen.joints.items()} if self.kitchen else {}
+                              for name, joints in self.kitchen.joints.items()}
         self.settled = None
-        self.settled = self.settle() if self.kitchen else None
+        self.settled = self.settle()
         self.renderers = {name: mujoco.Renderer(self.model, height=h, width=w) for name, (w, h) in CAMERAS.items()}
         self.viewer = None
         if viewer:
             from mujoco import viewer as passive_viewer
             self.viewer = passive_viewer.launch_passive(self.model, self.data)
 
-    def reset(self, seed=0, start=None):
+    def reset(self, start=None):
         """Restore the scene; `start` = (x, y, yaw) parks the robot somewhere else from now on."""
         model, data = self.model, self.data
         if start is not None:
@@ -63,7 +61,7 @@ class MujocoScene:
         else:
             data.mocap_pos[0] = [self.start[0], self.start[1], root_z]
             data.mocap_quat[0] = yaw_quat(self.start[2])
-        self.place_objects(seed)
+        self.place_objects()
         data.ctrl[self.arm_ctrl] = data.qpos[self.arm_q]
         data.ctrl[self.gripper_ctrl] = REST_POSITIONS["panda_finger_joint1"]
         mujoco.mj_forward(model, data)
@@ -85,15 +83,9 @@ class MujocoScene:
         return {name: tuple(data.qpos[a:a + n].copy() for a, n in ((model.joint(name).qposadr[0], 3), (model.joint(name).qposadr[0] + 3, 4)))
                 for name in self.objects}
 
-    def place_objects(self, seed):
+    def place_objects(self):
         model, data = self.model, self.data
-        if self.kitchen:
-            poses = self.settled or self.kitchen.movable
-        else:
-            rng = np.random.default_rng(seed)
-            poses = {name: ([*xy, CUBE_HALF], yaw_quat(rng.uniform(0, 2*np.pi) if name == "red_cube" else 0.0))
-                     for name, xy in CUBES.items()}
-        for name, (position, quat) in poses.items():
+        for name, (position, quat) in (self.settled or self.kitchen.movable).items():
             address = model.joint(name).qposadr[0]
             data.qpos[address:address + 3] = position
             data.qpos[address + 3:address + 7] = quat
@@ -159,10 +151,7 @@ class MujocoScene:
                 for name, joints in self.articulations.items()}
 
     def layout(self):
-        robot = f"mobile_panda_{self.base}"
-        if self.kitchen:
-            return {**self.kitchen.layout, "start": list(self.start), "robot": robot}
-        return tabletop_layout(self.start, robot)
+        return {**self.kitchen.layout, "start": list(self.start), "robot": f"mobile_panda_{self.base}"}
 
     def close(self):
         if self.viewer is not None:

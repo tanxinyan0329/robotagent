@@ -4,7 +4,7 @@
 "已核对"表示打开过官方仓库或模型页确认；"未核对"表示只在搜索结果中看到。使用前请再看一次原仓库的许可证和说明。
 
 这些项目都不在本仓库里，也没有接进本平台。表中的"训练仿真器"决定了迁移成本：
-**抓取位姿模型**只依赖点云，换仿真器影响小；**策略类**的观测和控制器都和训练环境绑定，迁到 ManiSkill 通常要重新适配甚至重训。
+**抓取位姿模型**只依赖点云，换仿真器影响小；**策略类**的观测和控制器都和训练环境绑定，迁到 MuJoCo 通常要重新适配甚至重训。
 
 ## 1. 技能策略（直接输出动作）
 
@@ -37,7 +37,7 @@
 | 项目 | 说明 | 许可 |
 |---|---|---|
 | [cuRobo](https://github.com/NVlabs/curobo) | GPU 加速无碰撞运动生成，原生支持 Franka | Apache-2.0 |
-| mplib（ManiSkill 自带） | `mani_skill.examples.motionplanning.panda` 有 Panda 示例，也能用来生成示范数据 | 随 ManiSkill |
+| mplib | 本项目的运动规划层 | 已集成 |
 
 ## 4. 端到端 VLA 与多任务模型
 
@@ -50,5 +50,5 @@
 ## 选型建议
 
 1. **抓取**：GraspGen 或 M2T2 出位姿，cuRobo 或 mplib 规划，替代只能在训练范围内工作的 PickCube PPO。
-2. **接触类技能**（推、开关、插入）：在 ManiSkill 里用 PPO 自己训练，见 [TRAINING.md](TRAINING.md)，比迁移 IsaacGym 策略省事。
+2. **接触类技能**（推、开关、插入）：用 PPO 自己训练，见 [training/README.md](../training/README.md)，比迁移 IsaacGym 策略省事。
 3. **RoboCasa** 适合当数据来源和对照，不适合直接接进本平台。

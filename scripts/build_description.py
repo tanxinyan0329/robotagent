@@ -1,25 +1,17 @@
-"""Generate the mobile Panda URDFs (ROS package:// mesh paths) from ManiSkill's unchanged panda_v2.urdf.
+"""Generate the mobile Panda URDFs (committed to the repo) from panda_v2.urdf and geometry.py.
 
-Ported from the earlier agent_demo/mobile_panda/build_model.py. Geometry, masses and joints are the
-same; additions are two camera frames and package:// mesh URIs so ROS and the simulator load one file.
-
-Run in the simulation Conda environment:
     python scripts/build_description.py
-Outputs (committed to the repo):
-    ros2_ws/src/mobile_panda_description/urdf/mobile_panda_{wheels,planar}.urdf
-    ros2_ws/src/mobile_panda_description/meshes/franka/...   (copied Panda meshes)
 """
 from copy import deepcopy
 from pathlib import Path
 import math
-import shutil
 import sys
 import xml.etree.ElementTree as E
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mobile_panda_sim.geometry import (HEIGHT, RADIUS, TRACK, BASE_CAMERA_EYE, BASE_CAMERA_TARGET,
                                        HAND_MOUNT_XYZ, HAND_MOUNT_RPY, HAND_CAMERA_XYZ)
-from mobile_panda_sim.paths import DESCRIPTION, PACKAGE
+from mobile_panda_sim.paths import DESCRIPTION, PACKAGE, PANDA_URDF
 
 MESH_URI = f"package://{PACKAGE}/meshes/franka"
 
@@ -79,7 +71,7 @@ def fmt(values):
 
 
 def look_at_rpy(eye, target):
-    """SAPIEN camera convention (x forward, y left, z up), same as mani_skill.utils.sapien_utils.look_at."""
+    """Camera link rotation looking from eye to target (x forward, y left, z up)."""
     f = [t - e for t, e in zip(target, eye)]
     n = math.sqrt(sum(v*v for v in f))
     f = [v/n for v in f]
@@ -97,7 +89,7 @@ def look_at_rpy(eye, target):
 
 
 def camera(root, name, parent, xyz, rpy):
-    """<name>_link follows SAPIEN's camera axes (the simulator mounts the camera here);
+    """<name>_link looks along +x with z up (the simulator mounts the camera here);
     <name>_optical_frame follows ROS REP-103 optical axes (z forward, x right, y down)."""
     link(root, f"{name}_link", mass=0.001)
     joint(root, f"{name}_joint", parent, f"{name}_link", xyz=fmt(xyz), rpy=fmt(rpy))
@@ -106,17 +98,7 @@ def camera(root, name, parent, xyz, rpy):
           rpy=fmt((-math.pi/2, 0, -math.pi/2)))
 
 
-def copy_meshes(source_dir):
-    target = DESCRIPTION / "meshes/franka"
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(source_dir / "franka_description/meshes", target)
-
-
 def build():
-    from mani_skill import PACKAGE_ASSET_DIR
-    source = Path(PACKAGE_ASSET_DIR) / "robots/panda/panda_v2.urdf"
-    copy_meshes(source.parent)
     for mode in ("wheels", "planar"):
         root = E.Element("robot", name=f"mobile_panda_{mode}")
         if mode == "planar":
@@ -139,7 +121,7 @@ def build():
             link(root, f"{side}_support", "sphere", SUPPORT_RADIUS, mass=0.5,
                  color="0.15 0.15 0.15 1", collision=mode == "wheels")
             joint(root, f"{side}_support_mount", "chassis_link", f"{side}_support", xyz=f"{x} 0 -0.165")
-        original = E.parse(source).getroot()
+        original = E.parse(PANDA_URDF).getroot()
         for child in original:
             item = deepcopy(child)
             for mesh in item.findall(".//mesh"):

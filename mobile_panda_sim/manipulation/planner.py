@@ -1,6 +1,5 @@
 """Arm motion planning for the mobile Panda: IK, collision-free RRT and straight-line (screw) motion."""
 import os
-from pathlib import Path
 import time
 
 import mplib
@@ -8,7 +7,6 @@ import numpy as np
 
 from .pose import Pose
 
-PANDA_URDF = Path(__file__).resolve().parent / "panda/panda_v2.urdf"
 CLOUD_RADIUS = 1.25
 CLOUD_DENSITY = 8000
 IDLE_PERIOD = 1 / 30
@@ -33,7 +31,7 @@ def planner_description():
     """Panda URDF/SRDF for mplib with the mobile base (pedestal + chassis boxes) fixed under panda_link0,
     so arm-vs-own-base collisions are self-collisions. Written to outputs/planner/."""
     from ..geometry import HEIGHT
-    from ..paths import DESCRIPTION, OUTPUTS
+    from ..paths import DESCRIPTION, OUTPUTS, PANDA_URDF
     pillar = HEIGHT - 0.27
     out = OUTPUTS / "planner"
     out.mkdir(parents=True, exist_ok=True)

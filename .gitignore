@@ -7,18 +7,11 @@ __pycache__/
 # Run outputs, generated simulator URDF copies, videos, reports
 outputs/
 
-# Weights are downloaded (scripts/download_checkpoints.py); keep the license/readme
-skills/checkpoints/*
-!skills/checkpoints/README.md
-!skills/checkpoints/mujoco/
-
 # Downloaded by scripts/download_menagerie.py
-/assets/
+/assets/mujoco_menagerie/
 
-# PPO training runs
-training/ppo/runs/
-training/mujoco/runs/
-training/ppo/wandb/
+# Training runs
+training/runs/
 
 # colcon artifacts
 ros2_ws/build/

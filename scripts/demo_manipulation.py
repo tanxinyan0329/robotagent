@@ -1,5 +1,4 @@
-"""Classical manipulation skills in the kitchen scene: pick / place, open / close drawers and doors.
-ManiSkill by default; --backend mujoco runs the same skills on MuJoCo (interpreter with mujoco and mplib).
+"""Classical manipulation skills in the home scene: pick / place, open / close drawers and doors.
 
 Each scenario parks the robot at a fixed base pose (navigation is not part of these skills) and runs a
 skill sequence. Every step is checked: skill success, plus any other object moved > 2 cm.
@@ -9,7 +8,7 @@ skill sequence. Every step is checked: skill success, plus any other object move
     python scripts/demo_manipulation.py fridge                 # fridge door, 35 deg
     python scripts/demo_manipulation.py all --repeat 3 --report outputs/manipulation.json
     python scripts/demo_manipulation.py fridge --record outputs/fridge.mp4
-    python scripts/demo_manipulation.py drawer --viewer        # watch in the SAPIEN window (close it to stop)
+    python scripts/demo_manipulation.py drawer --viewer        # watch in the MuJoCo window (close it to stop)
 """
 import argparse
 import json
@@ -21,6 +20,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mobile_panda_sim.manipulation.skills import ManipulationSkills  # noqa: E402
+from mobile_panda_sim.mj.sim import MujocoScene  # noqa: E402
+from mobile_panda_sim.mj.world import MujocoWorld  # noqa: E402
 
 SCENARIOS = {
     "drawer": [
@@ -43,44 +44,13 @@ class WindowClosed(Exception):
     pass
 
 
-class ManiSkillRun:
+class Run:
     def __init__(self, args):
-        import gymnasium as gym
-        from mobile_panda_sim.scenes import SCENES
-        self.args = args
-        self.env = gym.make(SCENES["kitchen"], robot_uids=f"mobile_panda_{args.base}", obs_mode="none",
-                            control_mode="pd_joint_delta_pos", sim_backend="physx_cpu", reward_mode="none",
-                            render_mode="human" if args.viewer else "rgb_array")
-        self.w = self.env.unwrapped
-
-    def skills(self, start, on_step):
-        self.w.start = tuple(start)
-        self.env.reset(seed=0)
-        return ManipulationSkills(self.w, on_step=on_step, on_idle=self.show if self.args.viewer else None)
-
-    def show(self):
-        """Refresh the viewer window (also processes mouse / keyboard input)."""
-        viewer = self.w._viewer
-        if viewer is not None and viewer.closed:
-            raise WindowClosed
-        self.w.render()
-
-    def frame(self):
-        return self.w.render()[0].cpu().numpy()
-
-    def close(self):
-        self.env.close()
-
-
-class MujocoRun:
-    def __init__(self, args):
-        from mobile_panda_sim.mj.sim import MujocoScene
-        from mobile_panda_sim.mj.world import MujocoWorld
-        self.scene = MujocoScene("kitchen", args.base, viewer=args.viewer)
+        self.scene = MujocoScene(args.base, viewer=args.viewer)
         self.world = MujocoWorld(self.scene)
 
     def skills(self, start, on_step):
-        self.scene.reset(0, start)
+        self.scene.reset(start)
         return ManipulationSkills(self.world, on_step=on_step, on_idle=self.show if self.scene.viewer else None)
 
     def show(self):
@@ -129,7 +99,6 @@ def run(sim, start, steps, args, record=None):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("scenario", choices=[*SCENARIOS, "all"])
-    p.add_argument("--backend", choices=("maniskill", "mujoco"), default="maniskill")
     p.add_argument("--base", choices=("wheels", "planar"), default="wheels")
     p.add_argument("--repeat", type=int, default=1)
     p.add_argument("--viewer", action="store_true")
@@ -138,7 +107,7 @@ def main():
     args = p.parse_args()
     names = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     report, first = [], True
-    sim = (MujocoRun if args.backend == "mujoco" else ManiSkillRun)(args)
+    sim = Run(args)
     try:
         for name in names:
             for start, steps in SCENARIOS[name]:

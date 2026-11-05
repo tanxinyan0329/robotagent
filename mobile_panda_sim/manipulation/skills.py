@@ -76,14 +76,9 @@ def _rotation_pose(centre, axis, angle):
 
 
 class ManipulationSkills:
-    def __init__(self, world, step_fn=None, on_step=None, on_idle=None):
-        """world: a simulation behind the interface of maniskill_world.ManiSkillWorld or mj.world.MujocoWorld
-        (a ManiSkill environment is wrapped). on_step: called after every simulation step. on_idle: called
-        ~30 times a second while the skills are planning without stepping (seconds at a time), e.g. env.render
-        to keep a viewer window responsive."""
-        if not hasattr(world, "surface_points"):
-            from .maniskill_world import ManiSkillWorld
-            world = ManiSkillWorld(world, step_fn)
+    def __init__(self, world, on_step=None, on_idle=None):
+        """world: mj.world.MujocoWorld. on_step: called after every simulation step. on_idle: called ~30 times a
+        second while the skills are planning without stepping."""
         self.world = world
         self.planner = ArmPlanner(world)
         self.planner.idle = on_idle

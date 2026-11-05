@@ -1,129 +1,69 @@
 # 技能库
 
-技能库分三部分：
-
 | 部分 | 内容 | 位置 |
 |---|---|---|
-| 传统方法技能 | 逆运动学 + 运动规划 + 步骤脚本：抓取、放置、开关抽屉和柜门，不用训练 | [docs/manipulation.md](../docs/manipulation.md)，`catalog.json` |
-| 本地技能 | 可以下载权重、在本机直接运行的技能，已在 Linux 上实测 | 本文件，`catalog.json` |
-| 外部技能参考 | 网上已有的 Panda 技能、抓取位姿模型、运动规划和 VLA，附权重和许可证 | [EXTERNAL_SKILLS.md](EXTERNAL_SKILLS.md)，`external_skills.json` |
-| 训练方法 | 学生自己训练技能的路线，从本平台使用的 ManiSkill 开始 | [TRAINING.md](TRAINING.md) |
+| 传统方法技能 | 逆运动学 + 运动规划 + 步骤脚本：抓取、放置、开关抽屉和柜门，不用训练 | [docs/manipulation.md](../docs/manipulation.md) |
+| 强化学习技能 | 拿起并移动、放下，权重在 `skills/policies/` | [training/README.md](../training/README.md) |
+| 外部技能参考 | 网上已有的 Panda 技能、抓取位姿模型、运动规划和 VLA，附权重和许可证 | [EXTERNAL_SKILLS.md](EXTERNAL_SKILLS.md) |
 
-权重不放在仓库里，用脚本下载（约 30 MB，Apache-2.0，见 [checkpoints/README.md](checkpoints/README.md)）：
-
-```bash
-conda activate mshab
-python scripts/download_checkpoints.py            # 10 个 PPO 任务
-python scripts/download_checkpoints.py PegInsertionSide-v1 --with-demos   # 只有示范轨迹的任务
-```
-
-访问不了 huggingface.co 时先 `export HF_ENDPOINT=https://hf-mirror.com`。
+机器可读的目录：`catalog.json`、`external_skills.json`。
 
 ## 适用范围
 
 选技能前先看这张表。所有技能都读仿真真值，不经过相机；执行时底盘必须停稳。
 
-| 技能 | 能做 | 不能做 | 实测 | 仿真器 |
-|---|---|---|---|---|
-| `pick` | 从上方抓窄边小于 7.5 cm、放在够得着的台面上的物体 | 从侧面抓；抓抽屉、冰箱里的东西；台面靠墙一侧太远的物品 | 糖盒、梨、柠檬：ManiSkill 13/15（2 次碰动旁边的盒子），MuJoCo 15/15 | 两者 |
-| `place` | 把手中物体放到平整台面上 | 放进抽屉或冰箱；放到倾斜或很小的表面 | ManiSkill 15/15，MuJoCo 15/15 | 两者 |
-| `open` / `close` | 台柜上层左、中抽屉；冰箱上门开到约 35° 再关上 | 台柜右上和所有下层抽屉、冰箱下门、矮柜推拉门（把手太低，低于约 0.55 m）；从 70° 关冰箱门 | 各 15/15，两个仿真器相同 | 两者 |
-| `suggest_base_pose` | 给抽屉选一个开和关都够得着的停靠位 | 冰箱门：它假设底盘不动，ManiSkill 上从推荐位置关门只有 1/4，请用固定位置 `(0.249, 1.492, 1.107)` | 抽屉 16/16；冰箱门 MuJoCo 8/8，ManiSkill 开 4/4、关 1/4 | 两者 |
-| `home` | 手臂沿无碰撞路径回到收起姿态 | 手臂被卡住时 | 每轮都用到 | 两者 |
-| `mobile_pick_cube` | 桌面场景：抓起 4 cm 方块并举高 | 其他物体；放置；方块超出手臂前方 ±8/±10 cm | 20/20 | ManiSkill |
-| `mujoco_pick_cube` | 桌面场景：抓起 4 cm 方块并举高，方块可在手臂前方 ±10 cm 内 | 放置；避开旁边的物体；可靠地抓其他物体 | 方块 97.6%（500 回合）；移动抓取 80/80；未训练过的柠檬 9/9，梨 0/9 | MuJoCo |
-| ManiSkill 官方 PPO（10 个任务） | 各自的原始任务，固定底座、原始场景 | 移动底盘和住宅场景 | 29/30 | ManiSkill |
-
-抓住宅场景里的物品用 `pick`。两个强化学习策略只为方块训练，柠檬能抓成功不代表能用于其他物品：它们不知道物体形状，也不会避障。
-
-## 0. 传统方法技能（住宅场景，不用训练）
-
-`mobile_panda_sim/manipulation/skills.py`，详细说明、实测结果和适用范围见 [docs/manipulation.md](../docs/manipulation.md)。
-
-| 技能 | 功能 | 实测 |
-|---|---|---|
-| `pick(name)` | 从上方抓起物体（窄边 < 7.5 cm），抬高 12 cm | 玄关台糖盒、梨、柠檬：ManiSkill 13/15（2 次碰动旁边的盒子），MuJoCo 15/15 |
-| `place((x, y))` | 把手里的物体放到 (x, y) 处的台面上 | 6/6，误差 0.1–2.3 cm |
-| `open` / `close(articulation, joint)` | 抓住把手拉开或关上抽屉、柜门，够不着时重新抓 | 两个上层抽屉和冰箱上门：ManiSkill、MuJoCo 各开 15/15、关 15/15 |
-| `suggest_base_pose(articulation, joint)` | 计算底盘停在哪里既能拉开又能关回 | 用推荐位置开关 4 次：抽屉两个后端都全过；冰箱门 MuJoCo 全过，ManiSkill 关 1/4 |
-| `home()` | 机械臂沿无碰撞路径回到收起姿态 | — |
-
-```bash
-python scripts/demo_manipulation.py all --repeat 3 --report outputs/manipulation.json
-python scripts/demo_manipulation.py all --backend mujoco --repeat 5   # 同一份技能跑在 MuJoCo 上，在 MuJoCo 环境里运行
-```
-
-## 1. 能在移动 Panda 场景里运行的技能
-
-MuJoCo 上用的是在 MuJoCo 里训练的权重：`python scripts/demo_mobile_pick.py --backend mujoco`，实测 80/80，见 [training/mujoco](../training/mujoco/README.md)。下表是 ManiSkill 的结果。
-
-| ID | 功能 | 代码 | 实测（seed 0–4） |
+| 技能 | 能做 | 不能做 | 实测 |
 |---|---|---|---|
-| `mobile_pick_cube` | 底盘停在桌边后，抓起红块或蓝块并举到桌面上方 0.16 m | `mobile_panda_sim/skills/pick_cube.py` | 轮式底盘：红 5/5、蓝 5/5；平面底盘：红 5/5、蓝 5/5 |
+| `pick` | 从上方抓窄边小于 7.5 cm、放在够得着的台面上的物体 | 从侧面抓；抓抽屉、冰箱里的东西；台面靠墙一侧太远的物品 | 糖盒、梨、柠檬 15/15 |
+| `place` | 把手中物体放到平整台面上 | 放进抽屉或冰箱；放到倾斜或很小的表面 | 15/15 |
+| `open` / `close` | 台柜上层左、中抽屉；冰箱上门开到约 35° 再关上 | 台柜右上和所有下层抽屉、冰箱下门、矮柜推拉门（把手低于约 0.55 m）；从 70° 关冰箱门 | 开 15/15，关 15/15 |
+| `suggest_base_pose` | 选一个开和关都够得着的停靠位 | 不考虑底盘受力，假设底盘不动 | 两个抽屉和冰箱门，开 12/12，关 12/12 |
+| `home` | 手臂沿无碰撞路径回到收起姿态 | 手臂被卡住时 | 每轮都用到 |
+| 拿起并移动（`RLSkills.pick_move`） | 玄关台上的柠檬、梨、汤罐，底盘停在 `DOCK`，物体在工作区内 | 其他物体；其他台面；其他停靠位 | 500 回合 83.6%（柠檬 88%、梨 93%、汤罐 70%） |
+| 放下（`RLSkills.place`） | 把这三种物体放到玄关台工作区内的指定位置 | 其他物体和其他台面 | 500 回合 86.6%（柠檬 86%、梨 90%、汤罐 83%） |
+
+要抓住宅场景里的物品，用 `pick` 和 `place`，它们更通用，成功率也更高。强化学习技能的用途是教学和训练例程：它们只为这三种物体和这个台面训练，不要指望换物体也能用。
+
+## 传统方法技能
+
+代码在 `mobile_panda_sim/manipulation/skills.py`，用法和实测见 [docs/manipulation.md](../docs/manipulation.md)。
 
 ```bash
-python scripts/demo_mobile_pick.py                                  # 带窗口
-python scripts/demo_mobile_pick.py --no-render --seeds 0 1 2 3 4 --cube blue_cube --report outputs/pick.json
+.venv/bin/python scripts/demo_manipulation.py all --viewer
 ```
 
-工作原理：权重是 ManiSkill 官方 `PickCube-v1` 的 PPO，训练时 Panda 固定在 `(-0.615, 0, 0)`。
-适配器把移动场景里方块、夹爪中心、目标点的位姿换算到训练坐标系，生成同样的 42 维观测，
-所以底盘停在哪里都可以用，前提是方块落在训练范围内。
-
-- **前提条件**：底盘停稳；方块在机械臂坐标系下 x = 0.615±0.08 m、y = ±0.10 m，平放在桌面上。
-  `in_training_range()` 可以检查这一点；演示脚本的停车点是 `(-0.615, 方块 y, 0)`。
-- **动作**：arm(7) + gripper(1)，控制模式 `pd_joint_delta_pos`，策略运行时底盘速度必须为 0。
-- **成功判据**：方块被夹住且距目标点 ≤ 2.5 cm（PickCube 原判据）连续 5 步，之后继续夹持 1 s 不掉落，抓取过程中底盘漂移 < 2 cm。
-- **局限**：观测用的是仿真真值位姿，不是相机估计；只会"抓起并举高"，不会放置；
-  蓝块初始朝向固定为 yaw=0，所以 5 个 seed 下蓝块的场景其实相同；导航只是无障碍的点到点控制。
-
-一个注意点：ManiSkill 的 `Pose` 乘法会统一四元数符号，而训练观测保留的是 SAPIEN 原始符号。
-`q` 和 `-q` 在物理上是同一个旋转，但对网络来说是不同的输入，所以适配器手写了四元数乘法。
-
-## 2. 只能在原任务里运行的官方 PPO 技能
-
-这些权重在各自的原生任务中运行（固定底座 Panda，物体真值 state 观测）。
-要用到移动场景，需要像 `pick_cube.py` 那样写观测适配器，场景几何也要和原任务一致；推、拉这类技能还依赖原任务里的目标标记。
+## 强化学习技能
 
 ```bash
-python scripts/run_native_skill.py PushCube-v1 --seeds 0 1 2
-python scripts/run_native_skill.py --all --report outputs/native_skills.json
+.venv/bin/python scripts/demo_rl_skills.py --object pear                # 开到玄关台，拿起，移到指定位置，放下
+.venv/bin/python scripts/demo_rl_skills.py --no-viewer --episodes 20
 ```
 
-| 任务 | 功能 | 机器人 | 观测/动作维度 | 实测（seed 0/1/2） |
-|---|---|---|---|---|
-| PickCube-v1 | 抓取方块举到目标点 | panda | 42 / 8 | 3/3 |
-| PushCube-v1 | 把方块推到目标区域 | panda | 35 / 8 | 3/3 |
-| PullCube-v1 | 把方块拉回目标区域 | panda | 35 / 8 | 3/3 |
-| PokeCube-v1 | 用杆把方块戳到目标位置 | panda | 54 / 8 | 3/3 |
-| PushT-v1 | 把 T 形块推到目标位姿 | panda_stick | 31 / 7 | 3/3 |
-| RollBall-v1 | 把球推滚到目标区域 | panda | 44 / 8 | **2/3**（seed 0 失败） |
-| LiftPegUpright-v1 | 把躺倒的长杆扶正 | panda | 32 / 8 | 3/3 |
-| StackCube-v1 | 红块叠到绿块上 | panda | 48 / 8 | 3/3 |
-| TwoRobotPickCube-v1 | 双臂协作抓取 | panda ×2 | 66 / 16 | 3/3 |
-| TwoRobotStackCube-v1 | 双臂协作堆叠 | panda ×2 | 76 / 16 | 3/3 |
+```python
+from mobile_panda_sim.mj.rl_skills import RLSkills
+from mobile_panda_sim.mj.rl_tasks import DOCK, TABLE_Z
+from mobile_panda_sim.mj.sim import MujocoScene
+import numpy as np
 
-合计 29/30。判据是各任务自己的 `info["success"]`，不代表持续夹持或可以接着做下一步；
-3 个 seed 只能说明接入正确，不能当作成功率。每个任务还有 `pd_ee_delta_pos`、`pd_ee_delta_pose` 两种控制模式的权重，
-平台统一使用 `pd_joint_delta_pos`，所以没有单独列出。
+scene = MujocoScene("wheels", DOCK)
+scene.reset()
+skills = RLSkills(scene)
+skills.pick_move("pear", np.array([-3.40, -1.50, TABLE_Z + 0.15]))     # 目标是物体中心的世界坐标
+skills.place((-3.34, -1.56))                                           # 台面上的 (x, y)
+```
 
-## 3. 只有示范轨迹的任务（没有策略）
+轮式底盘从充电位出发，导航、拿起、移动、放下全流程的实测，每个物体 20 次，物体和目标位置随机：
 
-| 任务 | 功能 | 用途 |
-|---|---|---|
-| PegInsertionSide-v1 | 侧向销钉插孔 | 模仿学习数据 |
-| PlugCharger-v1 | 插充电器 | 模仿学习数据 |
-| PullCubeTool-v1 | 用 L 形工具勾回方块 | 模仿学习数据 |
+| 物体 | 拿起并移动 | 全流程 | 碰动旁边物品的回合 |
+|---|---|---|---|
+| 柠檬 | 19/20 | 17/20 | 0 |
+| 梨 | 19/20 | 16/20 | 1 |
+| 汤罐 | 15/20 | 11/20 | 3 |
 
-这些任务只有运动规划生成的轨迹（`--with-demos` 下载），没有策略网络，不能从新的初始状态完成任务。
-可以用 ManiSkill 的 BC / Diffusion Policy 基线训练成技能，见 [TRAINING.md](TRAINING.md)。
-
-没有收录的：`DrawTriangle-v1`、`StackPyramid-v1`（平台固定的 ManiSkill mshab 分支里没有这两个任务）；
-`AnymalC-Reach-v1`（四足机器人任务）。
+这是一个训练种子的结果。汤罐最不稳定，训练时成功率波动也较大。
 
 ## catalog.json 字段
 
-- `kind`：`classical`（传统方法）、`ppo_trained`（在 MuJoCo 上训练）、`ppo_adapted`（已适配到移动场景）、`ppo`（仅原任务）、`demonstrations_only`
+- `kind`：`classical`（传统方法）或 `rl`（强化学习）
 - `applies_to`、`not_for`：能做和不能做的事
-- `runs_in`：`mobile_scene` 或 `native_task`
-- `validated`：本仓库的实测结果、判据和运行环境
+- `validated`：实测结果、判据和运行环境

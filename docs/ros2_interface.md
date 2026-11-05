@@ -1,14 +1,14 @@
 # ROS2 接口
 
 命名空间 `/mobile_panda`。坐标系 `map` 是仿真世界坐标系：
-住宅场景（`scene:=kitchen`，默认）地面 z=0，+x 朝东、+y 朝北；桌面场景（`scene:=tabletop`）桌面 z=0，地面 z=-0.9196 m，桌子在 +x 方向。
+地面 z=0，+x 朝东、+y 朝北。
 
 ## 运行方式
 
 ```text
 ros2 launch ──> mobile_panda_bridge（系统 Python，rclpy）
                    │  stdin/stdout，逐行 JSON
-                   └─> mobile_panda_sim.ros2.worker（Conda 环境：ManiSkill 或 MuJoCo）
+                   └─> mobile_panda_sim.ros2.worker（装了 mujoco 的 Python）
                 robot_state_publisher（URDF + joint_states → TF）
 ```
 
@@ -26,7 +26,7 @@ ros2 launch ──> mobile_panda_bridge（系统 Python，rclpy）
 
 超出限制的命令会被拒绝，原因发布在 `/mobile_panda/status`（`"type": "rejected"`），同时打印在终端。
 
-**关节增量的含义**：控制模式是 ManiSkill 的 `pd_joint_delta_pos`，与 PPO 技能训练时相同。
+**关节增量的含义**：
 每一步的目标是"**当前实测**关节位置 + 增量"，由 PD 控制器跟踪；一个周期内跟不上的部分不会累计。
 所以连续发送 N 条 Δ，实际转动通常小于 N·Δ（实测：20 条 0.02 rad 约转 0.09 rad）。需要到达指定角度时，按 `joint_states` 闭环控制。
 
@@ -42,7 +42,7 @@ ros2 launch ──> mobile_panda_bridge（系统 Python，rclpy）
 |---|---|---|
 | `/mobile_panda/base_pose` | `geometry_msgs/PoseStamped` | `chassis_link` 在 `map` 中的真值位姿 |
 | `/mobile_panda/base_camera/rgb` | `sensor_msgs/Image`（rgb8，640×480） | 固定在机械臂安装板上、朝向前方工作区的相机 |
-| `/mobile_panda/hand_camera/rgb` | `sensor_msgs/Image`（rgb8，320×240） | 腕部相机（ManiSkill panda_v3 的 RealSense 安装位置） |
+| `/mobile_panda/hand_camera/rgb` | `sensor_msgs/Image`（rgb8，320×240） | 腕部相机（RealSense 的安装位置） |
 | `/mobile_panda/{base,hand}_camera/camera_info` | `sensor_msgs/CameraInfo` | 内参，无畸变；`frame_id` 为 `<相机>_optical_frame` |
 | `/mobile_panda/joint_states` | `sensor_msgs/JointState` | 全部主动关节（轮子/虚拟底盘关节 + 7 个臂关节 + 2 个手指） |
 | `/tf` | | `map → chassis_link`（wheels）或 `map → world_root`（planar），其余由 robot_state_publisher 根据 URDF 发布 |
@@ -54,7 +54,7 @@ ros2 launch ──> mobile_panda_bridge（系统 Python，rclpy）
 `/mobile_panda/state` 里的物品位姿和关节位置是仿真真值，方便调试和评估。
 如果作业要求用视觉感知，请在任务书里说明只允许使用相机话题。
 
-相机坐标系：URDF 中 `<相机>_link` 是 SAPIEN 约定（x 向前、y 向左、z 向上），仿真相机就挂在这个坐标系上；
+相机坐标系：URDF 中 `<相机>_link` 的约定是（x 向前、y 向左、z 向上），仿真相机就挂在这个坐标系上；
 `<相机>_optical_frame` 是 ROS 光学约定（z 向前、x 向右、y 向下），图像的 `frame_id` 用的是它。
 
 ## 服务

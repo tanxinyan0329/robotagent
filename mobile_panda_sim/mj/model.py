@@ -7,8 +7,7 @@ import xml.etree.ElementTree as E
 import mujoco
 import numpy as np
 
-from ..geometry import (ARM_REST, BASE_CAMERA_SIZE, CAMERA_FOV_Y, CUBE_HALF, CUBES, GRIPPER_RANGE, HEIGHT, TABLE_CENTER, TABLE_HALF,
-                        TABLE_LEG_HALF, TABLE_LEGS, ZONE_HALF, ZONES)
+from ..geometry import ARM_REST, BASE_CAMERA_SIZE, CAMERA_FOV_Y, GRIPPER_RANGE
 from ..paths import MENAGERIE_PANDA, ros_urdf
 
 TIMESTEP = 0.002
@@ -19,8 +18,6 @@ GEOM_TYPES = {"box": mujoco.mjtGeom.mjGEOM_BOX, "cylinder": mujoco.mjtGeom.mjGEO
 JOINT_TYPES = {"continuous": mujoco.mjtJoint.mjJNT_HINGE, "prismatic": mujoco.mjtJoint.mjJNT_SLIDE}
 LOW_FRICTION_LINKS = ("front_support", "rear_support")
 BASE_DRIVES = {"wheels": dict(kv=30.0, force=40.0, limit=10.0), "planar": dict(kv=3000.0, force=5000.0, limit=10.0)}
-ZONE_COLORS = {"green_zone": [0.06, 0.65, 0.15, 1], "yellow_zone": [0.9, 0.75, 0.04, 1]}
-CUBE_COLORS = {"red_cube": [1, 0, 0, 1], "blue_cube": [0.05, 0.12, 0.95, 1]}
 PANDA_NAMES = re.compile(r'((?:name|joint|joint1|joint2|body1|body2)=")(link\d|joint\d|finger_joint\d|hand|left_finger|right_finger)"')
 FINGER_BODIES = {"left_finger": "panda_leftfinger", "right_finger": "panda_rightfinger"}
 # Camera frames: URDF links look along +x with z up; MuJoCo cameras look along -z with y up.
@@ -175,28 +172,6 @@ def add_cameras(spec, root):
         spec.body(parent).add_camera(name=name, pos=position, quat=quat, fovy=math.degrees(CAMERA_FOV_Y))
 
 
-def add_tabletop(spec):
-    world = spec.worldbody
-    box = mujoco.mjtGeom.mjGEOM_BOX
-    spec.add_texture(name="floor", type=mujoco.mjtTexture.mjTEXTURE_2D, builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
-                     rgb1=[0.42, 0.44, 0.47], rgb2=[0.36, 0.38, 0.41], width=256, height=256)
-    material = spec.add_material(name="floor", texrepeat=[10, 10], reflectance=0.0)
-    material.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "floor"
-    world.add_light(pos=[0, 0, 4 - HEIGHT], dir=[0.1, 0.2, -1], castshadow=True, diffuse=[0.8, 0.8, 0.8])
-    world.add_geom(name="ground", type=mujoco.mjtGeom.mjGEOM_PLANE, size=[8, 8, 0.1], pos=[0, 0, -HEIGHT], material="floor")
-    world.add_geom(name="table", type=box, size=[*TABLE_HALF, 0.035], pos=[*TABLE_CENTER, -0.035], rgba=[0.55, 0.36, 0.20, 1])
-    for i, (x, y) in enumerate(TABLE_LEGS):
-        world.add_geom(name=f"table_leg_{i}", type=box, size=[TABLE_LEG_HALF, TABLE_LEG_HALF, (HEIGHT-0.07)/2],
-                       pos=[x, y, (-HEIGHT-0.07)/2], rgba=[0.25, 0.25, 0.28, 1])
-    for name, xy in ZONES.items():
-        world.add_geom(name=name, type=box, size=[ZONE_HALF, ZONE_HALF, 0.0005], pos=[*xy, 0.001],
-                       rgba=ZONE_COLORS[name], contype=0, conaffinity=0)
-    for name, xy in CUBES.items():
-        body = world.add_body(name=name, pos=[*xy, CUBE_HALF])
-        body.add_freejoint(name=name)
-        body.add_geom(type=box, size=[CUBE_HALF]*3, rgba=CUBE_COLORS[name], density=1000)
-
-
 def add_environment(spec):
     spec.compiler.degree = False
     spec.option.timestep = TIMESTEP
@@ -209,12 +184,12 @@ def add_environment(spec):
     spec.visual.headlight.diffuse = [0.4, 0.4, 0.4]
 
 
-def build(add_scene, floor_z, base, start, extend=None):
+def build(add_scene, base, start, extend=None):
     """Compiled (model, spec): add_scene(spec) plus the robot parked at start = (x, y, yaw); extend(spec) adds bodies."""
     spec = mujoco.MjSpec()
     add_environment(spec)
     add_scene(spec)
     if extend is not None:
         extend(spec)
-    add_robot(spec, base, start[0], start[1], floor_z + ROOT_ABOVE_FLOOR[base], start[2])
+    add_robot(spec, base, start[0], start[1], ROOT_ABOVE_FLOOR[base], start[2])
     return spec.compile(), spec

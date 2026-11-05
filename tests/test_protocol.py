@@ -1,7 +1,7 @@
 """Command validation (no simulator needed)."""
 import pytest
 
-from mobile_panda_sim.ros2.protocol import gripper_action, validate_command
+from mobile_panda_sim.ros2.protocol import validate_command
 
 
 def test_valid_commands():
@@ -24,8 +24,3 @@ def test_valid_commands():
 def test_rejected_commands(command):
     with pytest.raises(ValueError):
         validate_command(command)
-
-
-def test_gripper_mapping_matches_controller_range():
-    assert gripper_action(-0.01) == pytest.approx(-1.0)
-    assert gripper_action(0.04) == pytest.approx(1.0)

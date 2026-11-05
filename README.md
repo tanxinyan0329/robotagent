@@ -1,17 +1,19 @@
-# 移动 Panda 仿真 ROS2 接口
+# 移动 Panda 仿真 ROS 2 接口
 
-在仿真中加载一台**差速底盘 + Franka Panda** 的移动机械臂和一个住宅场景（厨房 + 餐厅 + 客厅），默认用 ManiSkill，也可以用 MuJoCo，通过 ROS2 开放控制和感知接口，供学生编写 Agent。两个仿真器的接口相同。附带技能库：传统方法的抓取 / 放置 / 开关柜门、预训练技能、外部技能参考和训练方法。
+在 MuJoCo 中加载一台**差速底盘 + Franka Panda** 的移动机械臂和一个住宅场景（厨房 + 餐厅 + 客厅），通过 ROS 2 开放控制和感知接口，供学生编写 Agent。附带技能库：传统方法的抓取、放置、开关抽屉和柜门，以及两个用强化学习训练的技能。
 
 ## 交付内容
 
 | 内容 | 位置 |
 |---|---|
-| 机器人 URDF 与网格（与仿真加载的是同一份文件） | `ros2_ws/src/mobile_panda_description/urdf/mobile_panda_{wheels,planar}.urdf` |
+| 机器人 URDF 与网格 | `ros2_ws/src/mobile_panda_description/` |
 | launch：只加载场景并建立话题 | `ros2_ws/src/mobile_panda_bridge/launch/simulation.launch.py` |
-| ROS2 桥接节点、示例客户端 | `ros2_ws/src/mobile_panda_bridge/` |
-| 仿真场景、机器人定义 | `mobile_panda_sim/` |
-| 接口说明 | [docs/ros2_interface.md](docs/ros2_interface.md) |
+| ROS 2 桥接节点、示例客户端 | `ros2_ws/src/mobile_panda_bridge/` |
+| 仿真模型和场景 | `mobile_panda_sim/mj/`、`assets/mujoco_kitchen/` |
 | 技能库 | [skills/README.md](skills/README.md) |
+| 强化学习训练 | [training/README.md](training/README.md) |
+| 接口说明 | [docs/ros2_interface.md](docs/ros2_interface.md) |
+| 仿真模型说明 | [docs/mujoco.md](docs/mujoco.md) |
 
 主要话题（命名空间 `/mobile_panda`）：
 
@@ -31,17 +33,11 @@ launch 启动后加载场景、发布话题，然后等待命令：**不执行�
 
 ## 场景
 
-launch 参数 `scene` 选择场景：
-
-| `scene` | 内容 |
-|---|---|
-| `kitchen`（默认） | 约 8 m × 6 m 的住宅：带抽屉的厨房台柜、冰箱、餐桌椅、储物架、玄关台、沙发茶几等。42 个可移动物品（真实质量），台柜 7 个抽屉、冰箱 2 扇门、矮柜 2 扇推拉门可开合。地面 z=0，机器人从玄关的蓝色充电垫 `(-2.55, -1.95)` 出发，朝北 |
-| `tabletop` | 技能测试用的桌面：桌面 z=0、地面 z=-0.92 m，红、蓝两个 4 cm 方块和两个放置区，起点 `(-1.15, -0.30)` |
+约 8 m × 6 m 的住宅：带抽屉的厨房台柜、冰箱、餐桌椅、储物架、玄关台、沙发茶几等，42 个可以拿起的物品。
 
 ![住宅场景](docs/kitchen_scene.png)
 
-场景没有任务逻辑和成功判据，任务由 Agent 或任务书定义。物品和家具的位置、抽屉和门的开合程度在 `/mobile_panda/state`，
-家具占地范围在 `/mobile_panda/scene_info`。起点可以用 `start_x`、`start_y`、`start_yaw` 改。
+场景没有任务逻辑和成功判据，任务由 Agent 或任务书定义。物品和家具的位置、抽屉和门的开合程度在 `/mobile_panda/state`，家具占地范围在 `/mobile_panda/scene_info`。起点可以用 `start_x`、`start_y`、`start_yaw` 改。
 
 两种底盘（launch 参数 `base`）：
 
@@ -52,12 +48,9 @@ launch 参数 `scene` 选择场景：
 
 ## 环境要求
 
-- Ubuntu 22.04 + ROS2 Humble（系统 Python 3.10）
-- Conda 环境 `mshab`：与 [mshab-agent](https://github.com/tanxinyan0329/mshab-agent) 相同（Python 3.9，ManiSkill mshab 分支 3.0.0b18，PyTorch）。
-  ManiSkill 后端**不需要额外的 Conda 环境，也不需要 pip install**；仿真进程通过 `PYTHONPATH` 加载 `mobile_panda_sim/`。
-- 仿真使用 CPU 物理（`physx_cpu`），渲染需要支持 Vulkan 的显卡。
-
-ROS2 节点运行在系统 Python 上，不导入 Torch；仿真进程运行在 Conda Python 上，不导入 rclpy。两者通过进程管道通信。
+- Ubuntu 24.04 + ROS 2 Jazzy
+- Python 3.10 以上（24.04 自带 3.12），依赖见 `requirements.txt`
+- 支持 OpenGL 的显卡。无窗口渲染用 EGL。训练时有 GPU 更快，但不是必须的
 
 ## 安装
 
@@ -65,36 +58,14 @@ ROS2 节点运行在系统 Python 上，不导入 Torch；仿真进程运行在 
 git clone <本仓库地址> mobile-panda-agent
 cd mobile-panda-agent
 
-# 1. Conda 环境 mshab：按 mshab-agent 的 README 安装（ManiSkill mshab 分支，固定提交 17121e3f）
-#    住宅场景需要 ReplicaCAD 家具和 YCB 物品（装过 mshab-agent 的机器上已经有了，在 ~/.maniskill/data）
-conda activate mshab
-python -m mani_skill.utils.download_asset ReplicaCAD -y
-python -m mani_skill.utils.download_asset ycb -y
-conda deactivate
+# 1. Python 环境和 Panda 模型（约 36 MB）
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python scripts/download_menagerie.py
 
-# 2. ROS2 工作区
-source /opt/ros/humble/setup.bash
+# 2. ROS 2 工作区
+source /opt/ros/jazzy/setup.bash
 cd ros2_ws && colcon build --symlink-install && cd ..
-
-# 3. 技能权重（约 30 MB，只有运行技能时需要）
-conda activate mshab
-python scripts/download_checkpoints.py
-```
-
-访问不了 huggingface.co 时先 `export HF_ENDPOINT=https://hf-mirror.com`。
-
-使用 MuJoCo 时再做下面这步（只用 ManiSkill 可以跳过）。需要一个 Python 3.10 以上的 Conda 环境，导出厨房仍要用 `mshab`：
-
-```bash
-# 4. MuJoCo 后端
-conda create -n panda-mujoco python=3.10 -y
-conda activate panda-mujoco
-pip install -r requirements-mujoco.txt
-python scripts/download_menagerie.py               # Panda 模型，约 36 MB
-conda deactivate
-conda activate mshab
-python scripts/export_kitchen_mujoco.py            # 从 ManiSkill 导出厨房，约 19 MB
-conda deactivate
 ```
 
 ## 启动
@@ -102,71 +73,62 @@ conda deactivate
 在仓库根目录：
 
 ```bash
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 source ros2_ws/install/setup.bash
-ros2 launch mobile_panda_bridge simulation.launch.py              # 住宅场景，打开 SAPIEN 窗口
+ros2 launch mobile_panda_bridge simulation.launch.py                # 打开 MuJoCo 窗口
 ros2 launch mobile_panda_bridge simulation.launch.py viewer:=false rviz:=true
-ros2 launch mobile_panda_bridge simulation.launch.py scene:=tabletop base:=planar seed:=3
-ros2 launch mobile_panda_bridge simulation.launch.py backend:=mujoco                 # MuJoCo，首次使用先看 docs/mujoco.md
+ros2 launch mobile_panda_bridge simulation.launch.py base:=planar start_x:=0.0 start_y:=0.0 start_yaw:=0.0
 ```
 
-不在仓库根目录启动时，加 `project_root:=/path/to/mobile-panda-agent`，或设置环境变量 `MOBILE_PANDA_ROOT`。
-launch 会自动找装了对应仿真器的 Conda 环境，启动日志里会打印用的是哪个；找错或找不到时用 `sim_python:=...` 或 `MOBILE_PANDA_SIM_PYTHON` 指定。
+不在仓库根目录启动时，加 `project_root:=/path/to/mobile-panda-agent`，或设置环境变量 `MOBILE_PANDA_ROOT`。launch 优先用仓库里的 `.venv`，日志里会打印用的是哪个解释器；要换时用 `sim_python:=...` 或 `MOBILE_PANDA_SIM_PYTHON` 指定。
 
 检查接口（另开终端，launch 运行中）：
 
 ```bash
-source /opt/ros/humble/setup.bash && source ros2_ws/install/setup.bash
+source /opt/ros/jazzy/setup.bash && source ros2_ws/install/setup.bash
 ros2 run mobile_panda_bridge teleop_check
 ```
 
-它会接收所有传感器话题，然后让底盘前进、转向，动一个关节，开合夹爪，并检查位姿和关节状态有没有相应变化。
+它会接收所有传感器话题，然后让底盘前进、转向，动一个关节，开合夹爪，并检查位姿和关节状态有没有响应，最后输出 `"passed": true`。
 
 只看 URDF（不启动仿真）：`ros2 launch mobile_panda_description display.launch.py base:=wheels`
 
 ## 技能库
 
-详见 [skills/README.md](skills/README.md)。概要：
-
 每个技能能做和不能做的事见 [skills/README.md](skills/README.md#适用范围)。
 
-| 类别 | 内容 | 实测 |
-|---|---|---|
-| 传统方法技能 | 住宅场景里的抓取、放置、开关抽屉和冰箱门（逆运动学 + 运动规划，不用训练），见 [docs/manipulation.md](docs/manipulation.md) | 抽屉开 10/10、关 10/10；抓放 6/6；冰箱门开 35° 5/5、关 4/5 |
-| 移动场景技能 | `mobile_pick_cube`（桌面场景）：停到桌边后用 PickCube PPO 抓起红块或蓝块 | 两种底盘 × 两个方块 × 5 个 seed：20/20 |
-| 原任务 PPO | ManiSkill 官方 10 个 Panda 技能（推、拉、戳、推 T、滚球、扶正、堆叠、双臂抓取/堆叠等） | 29/30（RollBall seed 0 失败） |
-| 示范轨迹 | 插销、插充电器、用工具拉方块（无策略，可作模仿学习数据） | — |
-| 外部参考 | ManipGen、GraspGen、M2T2、cuRobo、RoboCasa 等 18 项 | 见 [EXTERNAL_SKILLS.md](skills/EXTERNAL_SKILLS.md) |
-| 训练方法 | MuJoCo PPO（[training/mujoco](training/mujoco/README.md)，抓取任务）、ManiSkill PPO（脚本已附带，已实测）、模仿学习、迁移到移动场景 | 见 [TRAINING.md](skills/TRAINING.md) |
+```bash
+.venv/bin/python scripts/demo_manipulation.py all --viewer      # 传统方法：抓放物品、开关抽屉和冰箱门
+.venv/bin/python scripts/demo_rl_skills.py                      # 强化学习：开到玄关台，拿起物体，放到指定位置
+```
 
-技能目前通过 Python 调用（`scripts/demo_manipulation.py`、`scripts/demo_mobile_pick.py`），**还没有接到 ROS 话题上**；学生的 Agent 通过 ROS 控制机器人。
+技能目前通过 Python 调用，**还没有接到 ROS 话题上**；学生的 Agent 通过 ROS 控制机器人。
 
 ## 修改模型
 
 不要直接改生成的 URDF，改 `mobile_panda_sim/geometry.py`（尺寸、相机位置）或 `scripts/build_description.py`（连杆结构），然后：
 
 ```bash
-conda activate mshab
-python scripts/build_description.py
-python tests/test_scene.py                                          # 场景、相机位姿、底盘、夹爪
-python scripts/demo_mobile_pick.py --no-render --seeds 0 1 2 3 4   # 结构改动后复测抓取
-/usr/bin/python3 -m pytest tests -q                                 # URDF/网格一致性、命令校验（系统 Python，需 pytest）
+.venv/bin/python scripts/build_description.py
+.venv/bin/pip install pytest
+env -u PYTHONPATH .venv/bin/python -m pytest tests -q
 ```
 
 ## 已知限制
 
-- MuJoCo 后端有两个场景、全部操作技能和抓取任务的强化学习；其他任务的 PPO 和模仿学习还只能在 ManiSkill 上用，见 [docs/mujoco.md](docs/mujoco.md)。
-- ManiSkill 后端沿用 ManiSkill Panda 的理想重力补偿（臂连杆不受重力），底盘连杆受重力。这不是完整的真实动力学模型。
 - 轮式底盘的前后支撑是低摩擦球，不是带转向轴的万向轮；质量、惯性、摩擦是仿真初值，未做实机辨识。
-- 轮式底盘的支撑球离地 1 mm，车身会有约 0.25° 的翘动；抓方块时底盘漂移不到 1 mm，拉冰箱门时 ManiSkill 的底盘可能被带动几厘米。
-- 没有障碍物地图话题；家具占地范围在 `/mobile_panda/scene_info` 中。
-- 技能只能在 Python 里调用，还没有接到 ROS 话题上；操作技能的适用范围见 [docs/manipulation.md](docs/manipulation.md)。
+- 轮式底盘的支撑球离地 1 mm，车身有约 0.25° 的翘动。
+- 住宅场景的数据是转换好的，仓库里没有重新生成它的工具。
+- 没有障碍物地图话题；家具占地范围在 `/mobile_panda/scene_info`。
+- 技能只能在 Python 里调用，还没有接到 ROS 话题上。
 - RViz 加载 `.glb` 网格时日志里没有报错，但还没有人眼确认显示效果。
+
+## 测试环境
+
+所有实测数字都来自 Ubuntu 22.04 + ROS 2 Humble，代码另在 Python 3.12 上测过。**Ubuntu 24.04 + ROS 2 Jazzy 还没有实测**，第一次部署时请跑一遍 `teleop_check` 和测试。
 
 ## 来源
 
-- MuJoCo 后端的 Panda 模型来自 [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)（Apache-2.0），由 `scripts/download_menagerie.py` 下载，不在仓库里。
-
-本仓库整理自本地 `agent_demo/mobile_panda`（Windows 版移动 Panda），改为 Linux + `mshab` 环境，并新增 ROS2 接口。
-Panda 网格、`panda_v2.urdf` 和 `panda_v2.srdf` 来自 ManiSkill（Apache-2.0）。住宅场景使用 ReplicaCAD（CC BY-NC 4.0，仅限非商业用途）
-和 YCB 物品模型，由 ManiSkill 下载，不包含在本仓库中。
+- Panda 模型来自 [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie)（Apache-2.0），由 `scripts/download_menagerie.py` 下载。
+- Panda 网格、`panda_v2.urdf` 和 `panda_v2.srdf` 来自 [ManiSkill](https://github.com/haosulab/ManiSkill)（Apache-2.0）。
+- 住宅场景使用 ReplicaCAD（CC BY-NC 4.0，**仅限非商业用途**）和 YCB 物品模型（CC BY 4.0），见 [assets/mujoco_kitchen/ATTRIBUTION.md](assets/mujoco_kitchen/ATTRIBUTION.md)。

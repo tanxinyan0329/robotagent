@@ -30,7 +30,7 @@
       "weights": "随仓库提供",
       "license": "见仓库 LICENSE",
       "source_checked": true,
-      "note": "面向真机 frankapy + 任务空间阻抗控制，迁到 ManiSkill 需重新适配观测和控制器",
+      "note": "面向真机 frankapy + 任务空间阻抗控制，迁到 MuJoCo 需重新适配观测和控制器",
       "links": [
         "https://github.com/NVlabs/industreallib"
       ]
@@ -197,15 +197,15 @@
     },
     {
       "layer": "motion_planning",
-      "name": "mplib（ManiSkill 自带）",
+      "name": "mplib",
       "function": "采样式运动规划",
-      "trained_in": "ManiSkill",
+      "trained_in": "—",
       "weights": "不需要权重",
-      "license": "见 ManiSkill",
+      "license": "见 mplib",
       "source_checked": true,
-      "note": "mani_skill.examples.motionplanning.panda 有 Panda 示例",
+      "note": "本项目的运动规划层",
       "links": [
-        "https://maniskill.readthedocs.io/en/latest/user_guide/demos/scripts.html"
+        "https://github.com/haosulab/MPlib"
       ]
     },
     {
