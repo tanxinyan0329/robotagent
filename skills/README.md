@@ -33,6 +33,7 @@ python scripts/download_checkpoints.py PegInsertionSide-v1 --with-demos   # 只�
 
 ```bash
 python scripts/demo_manipulation.py all --repeat 3 --report outputs/manipulation.json
+~/anaconda3/envs/llm/bin/python scripts/demo_manipulation.py all --backend mujoco --repeat 5   # 同一份技能，跑在 MuJoCo 上
 ```
 
 ## 1. 能在移动 Panda 场景里运行的技能

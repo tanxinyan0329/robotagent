@@ -3,11 +3,10 @@ from dataclasses import dataclass, field
 import math
 
 import numpy as np
-import sapien
-import torch
 
 from ..geometry import ARM_REST, MAX_JOINT_DELTA
-from .planner import ArmPlanner, pose_from_axes
+from .planner import ArmPlanner
+from .pose import Pose, pose_from_axes
 
 GRIPPER_OPEN, GRIPPER_CLOSED = 1.0, -1.0
 MAX_FINGER_SPAN = 0.075
@@ -71,19 +70,21 @@ def _rotation_pose(centre, axis, angle):
     """World transform rotating by `angle` about the line through `centre` along `axis`."""
     q = np.r_[math.cos(angle/2), np.asarray(axis) / np.linalg.norm(axis) * math.sin(angle/2)]
     centre = np.asarray(centre, float)
-    return sapien.Pose(centre) * sapien.Pose(q=q) * sapien.Pose(-centre)
+    return Pose(centre) * Pose(q=q) * Pose(-centre)
 
 
 class ManipulationSkills:
-    def __init__(self, env, step_fn=None, on_step=None, on_idle=None):
-        """on_step: called after every simulation step. on_idle: called ~30 times a second while the skills
-        are planning without stepping (seconds at a time), e.g. env.render to keep a viewer window
-        responsive."""
-        self.env = env
-        self.agent = env.agent
-        self.planner = ArmPlanner(env)
+    def __init__(self, world, step_fn=None, on_step=None, on_idle=None):
+        """world: a simulation behind the interface of maniskill_world.ManiSkillWorld or mj.world.MujocoWorld
+        (a ManiSkill environment is wrapped). on_step: called after every simulation step. on_idle: called
+        ~30 times a second while the skills are planning without stepping (seconds at a time), e.g. env.render
+        to keep a viewer window responsive."""
+        if not hasattr(world, "surface_points"):
+            from .maniskill_world import ManiSkillWorld
+            world = ManiSkillWorld(world, step_fn)
+        self.world = world
+        self.planner = ArmPlanner(world)
         self.planner.idle = on_idle
-        self.step_fn = step_fn or env.step
         self.on_step = on_step
         self.gripper = GRIPPER_OPEN
         self.held = None
@@ -92,11 +93,7 @@ class ManipulationSkills:
     def _step(self, q_target=None):
         q = self.planner.qpos()[:7]
         delta = np.zeros(7) if q_target is None else np.clip(q_target - q, -MAX_JOINT_DELTA, MAX_JOINT_DELTA)
-        action = self.agent.controller.from_action_dict(dict(
-            arm=torch.tensor(delta[None] / MAX_JOINT_DELTA, dtype=torch.float32),
-            gripper=torch.tensor([[self.gripper]], dtype=torch.float32),
-            base=torch.tensor([self.agent.base_action(0.0, 0.0)], dtype=torch.float32)))
-        self.step_fn(action)
+        self.world.step(delta, self.gripper)
         self.steps += 1
         if self.on_step:
             self.on_step()
@@ -121,7 +118,7 @@ class ManipulationSkills:
         branch as the grasp solution; tries shorter back-offs when the long one collides."""
         approach = grasp.to_transformation_matrix()[:3, 2]
         for distance in (APPROACH, 0.06, 0.04) if back_off is None else (back_off,):
-            pre = sapien.Pose(grasp.p - approach * distance, grasp.q)
+            pre = Pose(grasp.p - approach * distance, grasp.q)
             for q in self.planner.ik(pre, seed=grasp_q, n_init=10, avoid=True):
                 if np.abs(q - grasp_q).max() <= 0.6 and not self.planner.in_collision(q):
                     return pre, q
@@ -146,7 +143,7 @@ class ManipulationSkills:
         tcp = self.planner.tcp_pose()
         approach = tcp.to_transformation_matrix()[:3, 2]
         for distance in (APPROACH, 0.06, 0.03):
-            line = self.planner.plan_line(sapien.Pose(tcp.p - approach * distance, tcp.q))
+            line = self.planner.plan_line(Pose(tcp.p - approach * distance, tcp.q))
             if line is not None:
                 self._follow(line)
                 return True
@@ -167,14 +164,9 @@ class ManipulationSkills:
         except SkillError as error:
             return SkillResult(False, f"{name} failed: {error}", dict(error.info, steps=self.steps - start))
 
-    def _object_points(self, actor):
-        meshes = actor.get_collision_meshes(to_world_frame=True)
-        mesh = meshes[0] if isinstance(meshes, list) else meshes
-        return np.asarray(mesh.vertices)
-
-    def _grasps_for(self, actor):
+    def _grasps_for(self, name):
         """Top-down grasp candidates (TCP poses) for a resting object, best first."""
-        pts = self._object_points(actor)
+        pts = self.world.object_points(name)
         zmin, zmax = pts[:, 2].min(), pts[:, 2].max()
         xy = pts[:, :2]
         centre = (xy.min(0) + xy.max(0)) / 2
@@ -198,7 +190,7 @@ class ManipulationSkills:
 
     def _handle_frame(self, articulation, joint):
         """Handle bar centre, bar axis and outward normal (world), and the handle record."""
-        pose, handle = self.env.handle_pose(articulation, joint)
+        pose, handle = self.world.handle(articulation, joint)
         m = pose.to_transformation_matrix()
         return pose.p, m[:3, 0], m[:3, 2], handle
 
@@ -223,13 +215,6 @@ class ManipulationSkills:
                 break
         return grasps
 
-    def _link_grasped(self, link):
-        """Both fingers press on `link`."""
-        scene = self.env.scene
-        forces = [scene.get_pairwise_contact_forces(self.agent.finger1_link, link),
-                  scene.get_pairwise_contact_forces(self.agent.finger2_link, link)]
-        return all(float(torch.linalg.norm(f, dim=-1)[0]) > 0.5 for f in forces)
-
     def home(self):
         """Return the arm to the rest pose along a collision-free path (gripper unchanged)."""
         def body():
@@ -247,14 +232,14 @@ class ManipulationSkills:
         def body():
             if self.held:
                 raise SkillError(f"already holding {self.held}")
-            actor = self.env.movable_objects[name]
-            if not self._grasps_for(actor)[0]:
+            world = self.world
+            if not self._grasps_for(name)[0]:
                 raise SkillError(f"{name} is wider than the gripper in every direction")
             held = False
             for attempt in range(3):
                 self.planner.update_obstacles()
                 feasible = []
-                for grasp in self._grasps_for(actor)[0]:
+                for grasp in self._grasps_for(name)[0]:
                     grasp_qs = self.planner.ik(grasp)
                     if grasp_qs:
                         _, pre_q = self._pre_pose(grasp, grasp_qs[0], APPROACH)
@@ -268,23 +253,23 @@ class ManipulationSkills:
                 self._set_gripper(GRIPPER_OPEN, steps=4)
                 self._approach(grasp, grasp_q, "grasp", pre_q)
                 self._set_gripper(GRIPPER_CLOSED, steps=15)
-                if bool(self.agent.is_grasping(actor)[0]):
+                if world.is_grasping(name):
                     held = True
                     break
                 self._set_gripper(GRIPPER_OPEN)
                 self._back_off()
             if not held:
                 raise SkillError(f"fingers closed but {name} is not held ({attempt + 1} grasps tried)")
-            z0 = float(actor.pose.p[0, 2])
-            self._line(sapien.Pose(grasp.p + [0, 0, LIFT], grasp.q), what="lift pose", slow=True)
-            lifted = float(actor.pose.p[0, 2]) - z0
-            if not bool(self.agent.is_grasping(actor)[0]) or lifted < 0.05:
+            z0 = float(world.object_position(name)[2])
+            self._line(Pose(grasp.p + [0, 0, LIFT], grasp.q), what="lift pose", slow=True)
+            lifted = float(world.object_position(name)[2]) - z0
+            if not world.is_grasping(name) or lifted < 0.05:
                 raise SkillError(f"{name} slipped during the lift")
             self.held = name
             tcp = self.planner.tcp_pose()
-            pts = self._object_points(actor)
+            pts = world.object_points(name)
             lo, hi = pts.min(0), pts.max(0)
-            box_centre = sapien.Pose((lo + hi) / 2)
+            box_centre = Pose((lo + hi) / 2)
             self.planner.attach_box(hi - lo + 0.01, tcp.inv() * box_centre)
             return dict(object=name, lifted=round(lifted, 3))
         return self._run(f"pick({name})", body)
@@ -295,16 +280,15 @@ class ManipulationSkills:
         def body():
             if not self.held:
                 raise SkillError("not holding anything")
-            actor = self.env.movable_objects[self.held]
-            pts = self._object_points(actor)
+            pts = self.world.object_points(self.held)
             bottom = np.r_[(pts[:, :2].min(0) + pts[:, :2].max(0)) / 2, pts[:, 2].min()]
             tcp = self.planner.tcp_pose()
             offset = tcp.p - bottom
             x, y = float(target[0]), float(target[1])
-            support = height if height is not None else self._surface(x, y, exclude=actor)
+            support = height if height is not None else self.world.surface(x, y, exclude=self.held)
             if support is None:
                 raise SkillError(f"no surface under ({x:.2f}, {y:.2f})")
-            goal = sapien.Pose(np.r_[x, y, support + 0.012] + offset, tcp.q)
+            goal = Pose(np.r_[x, y, support + 0.012] + offset, tcp.q)
             self.planner.update_obstacles(exclude={self.held})
             goal_qs = self.planner.ik(goal)
             pre_q = self._pre_pose(goal, goal_qs[0], LIFT)[1] if goal_qs else None
@@ -314,10 +298,10 @@ class ManipulationSkills:
             self._set_gripper(GRIPPER_OPEN, steps=12)
             self.planner.detach()
             name, self.held = self.held, None
-            self._line(sapien.Pose(goal.p + [0, 0, LIFT], goal.q), what="retreat pose")
+            self._line(Pose(goal.p + [0, 0, LIFT], goal.q), what="retreat pose")
             for _ in range(10):
                 self._step(self.planner.qpos()[:7])
-            pts = self._object_points(actor)
+            pts = self.world.object_points(name)
             placed = np.r_[(pts[:, :2].min(0) + pts[:, :2].max(0)) / 2, pts[:, 2].min()]
             error = float(np.linalg.norm(placed[:2] - [x, y]))
             if error > 0.04 or abs(placed[2] - support) > 0.03:
@@ -325,23 +309,6 @@ class ManipulationSkills:
                                  f"surface {support:.3f})")
             return dict(object=name, position_error=round(error, 3), support=round(float(support), 3))
         return self._run("place", body)
-
-    def _surface(self, x, y, exclude=None, top=2.0):
-        """Height of the first surface under (x, y), ignoring the robot and the held object."""
-        skip = {link._objs[0].entity for link in self.agent.robot.links}
-        if exclude is not None:
-            skip.add(exclude._objs[0])
-        z = top
-        for _ in range(400):
-            hit = self.env.scene.px.raycast(np.array([x, y, z], np.float32), np.array([0, 0, -1], np.float32), z + 0.1)
-            if hit is None:
-                return None
-            if hit.component.entity not in skip:
-                return float(hit.position[2])
-            z = min(float(hit.position[2]) - 0.002, z - 0.01)
-            if z < 0:
-                return None
-        return None
 
     def open(self, articulation, joint, target=None):
         """Open a drawer (prismatic) or door (revolute) by its handle. `target` is the joint position to
@@ -353,38 +320,28 @@ class ManipulationSkills:
         return self._actuate(articulation, joint, 0.0, opening=False)
 
     def _joint_model(self, articulation, joint, target, opening):
-        j = self.env.joint(articulation, joint)
-        raw = j._objs[0]
-        kind = "prismatic" if raw.type == "prismatic" else "revolute"
-        lo, hi = (float(v) for v in raw.get_limits()[0])
-        art = self.env.articulations[articulation]
-        index = [jj.name for jj in art.get_active_joints()].index(joint)
-        q0 = float(art.qpos[0, index])
+        info = self.world.joint_info(articulation, joint)
+        kind, q0, anchor, axis = info["kind"], info["position"], info["anchor"], info["axis"]
+        lo, hi = info["limits"]
         if opening:
             goal = target if target is not None else (0.25 if kind == "prismatic" else 0.6)
         else:
             goal = 0.0
         goal = float(np.clip(goal, lo, hi))
-        frame = raw.get_global_pose()
-        axis = frame.to_transformation_matrix()[:3, 0]
 
         def moved(pose, dq):
             if kind == "prismatic":
-                return sapien.Pose(pose.p + axis * dq, pose.q)
-            return _rotation_pose(frame.p, axis, dq) * pose
-        return dict(joint=j, kind=kind, art=art, index=index, q0=q0, goal=goal, moved=moved, names=(articulation, joint),
-                    step=0.01 if kind == "prismatic" else 0.02, frame=frame, axis=axis)
+                return Pose(pose.p + axis * dq, pose.q)
+            return _rotation_pose(anchor, axis, dq) * pose
+        return dict(kind=kind, q0=q0, goal=goal, moved=moved, names=(articulation, joint),
+                    step=0.01 if kind == "prismatic" else 0.02, anchor=anchor, axis=axis)
 
     def _panel(self, articulation, joint):
         """Door panel of a revolute joint: centre, normal (thin axis), vertical and radial (hinge -> free
         edge) axes, half extents along them, from the link's largest collision box."""
-        link = self.env.joint(articulation, joint).child_link
-        boxes = [s_ for s_ in link._objs[0].get_collision_shapes() if hasattr(s_, "half_size")]
-        box = max(boxes, key=lambda b: np.prod(b.half_size))
-        m = (link.pose.sp * box.get_local_pose()).to_transformation_matrix()
-        half = np.asarray(box.half_size)
+        m, half = self.world.panel_box(articulation, joint)
         model = self._joint_model(articulation, joint, None, True)
-        hinge, axis = model["frame"].p, model["axis"]
+        hinge, axis = model["anchor"], model["axis"]
         order = np.argsort(half)
         normal_i = order[0]
         vertical_i = max((i for i in range(3) if i != normal_i), key=lambda i: abs(m[:3, i] @ axis))
@@ -410,8 +367,8 @@ class ManipulationSkills:
                 cand["grasp"] = moved(cand["grasp"], offset)
                 if cand["clearance"] is not None:
                     c, n_, gap = cand["clearance"]
-                    tip = moved(sapien.Pose(c + n_), offset).p
-                    c2 = moved(sapien.Pose(c), offset).p
+                    tip = moved(Pose(c + n_), offset).p
+                    c2 = moved(Pose(c), offset).p
                     cand["clearance"] = (c2, tip - c2, gap)
         return candidates
 
@@ -455,8 +412,8 @@ class ManipulationSkills:
     def _outside_door(self, q7, door, model, dq, margin=0.06):
         """Arm links 3-6 stay >= margin on the outer side of the door (at joint offset dq), or beyond its
         edges."""
-        centre = model["moved"](sapien.Pose(door["centre"]), dq).p
-        rot = model["moved"](sapien.Pose(), dq).to_transformation_matrix()[:3, :3]
+        centre = model["moved"](Pose(door["centre"]), dq).p
+        rot = model["moved"](Pose(), dq).to_transformation_matrix()[:3, :3]
         out, vertical, radial = rot @ door["out"], rot @ door["vertical"], rot @ door["radial"]
         half_n, half_v, half_r = door["half"]
         for p in self.planner.link_positions(q7)[:4]:
@@ -517,13 +474,13 @@ class ManipulationSkills:
         reachable. Returns ((x, y, yaw), coverage) with coverage in [0, 1], best first; does not move.
         Footprints of furniture (scene layout) are kept 5 cm clear of the chassis."""
         model = self._joint_model(articulation, joint, target, opening)
-        link_name = model["joint"].child_link.name
+        link_name = self.world.moving_link(articulation, joint)
         handle, _, normal, _ = self._handle_frame(articulation, joint)
         if model["kind"] == "revolute":
-            handle = model["moved"](sapien.Pose(handle), (model["goal"] - model["q0"]) / 2).p
+            handle = model["moved"](Pose(handle), (model["goal"] - model["q0"]) / 2).p
         out = np.r_[normal[:2], 0.0]; out /= np.linalg.norm(out)
         side = np.array([-out[1], out[0], 0.0])
-        blocked = [f["footprint"] for f in self.env.layout()["furniture"]]
+        blocked = [f["footprint"] for f in self.world.layout()["furniture"]]
         best = []
         try:
             for distance in np.arange(0.40, 1.05, 0.025):
@@ -584,10 +541,10 @@ class ManipulationSkills:
             if self.held:
                 raise SkillError(f"holding {self.held}; place it first")
             model = self._joint_model(articulation, joint, target, opening)
-            kind, art, index, goal = (model[k] for k in ("kind", "art", "index", "goal"))
+            kind, goal = model["kind"], model["goal"]
             if abs(goal - model["q0"]) < 0.01:
                 return dict(joint_position=round(model["q0"], 3), note="already there")
-            link = model["joint"].child_link
+            link = self.world.moving_link(articulation, joint)
             tolerance = 0.03 if kind == "prismatic" else 0.08
             log, failed = [], set()
             for stage in range(stages + 2):
@@ -595,7 +552,7 @@ class ManipulationSkills:
                 q_now = model["q0"]
                 if abs(goal - q_now) <= tolerance / 2:
                     break
-                full, free = self.planner.build_cloud(), self.planner.build_cloud(exclude={link.name})
+                full, free = self.planner.build_cloud(), self.planner.build_cloud(exclude={link})
                 best = self._best_drag(model, link, q_now, full, free, skip=failed)
                 if best is None or best[0] < 0.01:
                     if stage == 0:
@@ -613,7 +570,7 @@ class ManipulationSkills:
                     continue
                 self._set_gripper(GRIPPER_CLOSED, steps=15)
                 gap = float(self.planner.qpos()[7:].sum())
-                if not self._link_grasped(link) or abs(gap - cand["width"]) > 0.01:
+                if not self.world.link_grasped(articulation, joint) or abs(gap - cand["width"]) > 0.01:
                     self._set_gripper(GRIPPER_OPEN)
                     self._back_off()
                     log.append(dict(grasp=cand["kind"], held=False, gap=round(gap, 3)))
@@ -621,7 +578,7 @@ class ManipulationSkills:
                     continue
                 model = self._joint_model(articulation, joint, target, opening)
                 dqs, _ = self._drag_targets(model, model["q0"])
-                self.planner.use_cloud(self.planner.build_cloud(exclude={link.name},
+                self.planner.use_cloud(self.planner.build_cloud(exclude={link},
                                                                 clear=(self.planner.tcp_pose().p, 0.08)))
                 path, reached = self._drag_path(model, cand, self.planner.tcp_pose(), dqs, self.planner.qpos()[:7], avoid=True)
                 checked = True
@@ -634,14 +591,14 @@ class ManipulationSkills:
                 self._set_gripper(GRIPPER_OPEN, steps=10)
                 self.planner.use_cloud(full)
                 self._back_off()
-                q_after = float(art.qpos[0, index])
+                q_after = self.world.joint_position(articulation, joint)
                 log.append(dict(grasp=cand["kind"], held=True, start=round(model["q0"], 3), to=round(q_after, 3),
                                 planned=f"{reached}/{len(dqs)}", predicted=round(best[0], 3), collision_checked=checked))
                 if abs(q_after - model["q0"]) < 0.005:
                     failed.add(cand["index"])
                 if sum(1 for l in log if l["held"]) >= stages:
                     break
-            q_after = float(art.qpos[0, index])
+            q_after = self.world.joint_position(articulation, joint)
             info = dict(joint_position=round(q_after, 3), goal=round(goal, 3), stages=log)
             if abs(q_after - goal) > tolerance:
                 raise SkillError(f"joint stopped at {q_after:.3f} (goal {goal:.3f}) after {len(log)} grasp(s); "

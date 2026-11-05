@@ -183,7 +183,8 @@ class MujocoSimulation(Simulation):
         return dict(base_pose={**pose_dict(*chassis), "yaw": yaw_of(chassis[1])},
                     root_pose=pose_dict(*scene.pose(scene.root)), tcp_pose=pose_dict(*scene.tcp_pose()),
                     joint_positions=qpos, joint_velocities=scene.joint_velocities().tolist(), gripper_width=qpos[-2:],
-                    objects={name: pose_dict(*scene.pose(body)) for name, body in scene.objects.items()}, articulations={})
+                    objects={name: pose_dict(*scene.pose(body)) for name, body in scene.objects.items()},
+                    articulations=scene.articulation_positions())
 
     def close(self):
         self.scene.close()

@@ -1,9 +1,10 @@
-"""MuJoCo contact check: lift the cubes, then open and close a test drawer with the gripper.
+"""MuJoCo contact check: tabletop cubes and a test drawer, then the kitchen's real drawers, fridge door and groceries.
 
     python scripts/mj_contact_check.py --seeds 0 1 2 3 4 --report outputs/mj_contact.json
+    python scripts/mj_contact_check.py --kitchen-only
 
-The drawer is test-only, with the kitchen's handle bar and joint settings. Arm motion is plain damped
-least-squares IK with a joint-space approach; it measures grasp and drag physics, it is not a skill.
+The test drawer has the kitchen's handle bar and joint settings. Base poses come from demo_manipulation.py. Arm motion is damped
+least-squares IK with collision checks; it measures grasp and drag physics, it is not a skill.
 """
 import argparse
 import json
@@ -26,6 +27,10 @@ DRAWER_TRAVEL, DRAWER_TARGET = 0.30, 0.25
 LIFT, HOLD_STEPS = 0.12, 60
 OPEN, SQUEEZE = 0.04, -0.01
 STEP_M = 0.004
+DRAG_SAMPLES, DRAG_STEPS, MAX_PITCH = 100, 2, 70
+SETTLE_HOLD = 20
+SLIDE_OVERSHOOT, HINGE_OVERSHOOT = 0.02, 0.05
+READY_POSES = ((0, -0.6, 0, -2.4, 0, 1.9, 0.78), (0.9, -0.5, 0, -2.3, 0, 1.9, 0.78), (-0.9, -0.5, 0, -2.3, 0, 1.9, 0.78))
 ROBOT_BODIES = ("chassis_link", "pedestal_link")
 
 
@@ -76,17 +81,50 @@ class Arm:
             q = np.clip(q + j.T @ np.linalg.solve(j @ j.T + 1e-4*np.eye(6), error), self.lower, self.upper)
         return q, float(np.linalg.norm(error[:3]))
 
-    def collides(self, q):
-        """True if the arm at joints q touches anything outside the robot."""
+    def solutions(self, position, quat, seed_q, tries=60):
+        """Distinct collision-free IK solutions for the pose, nearest to seed_q first."""
+        rng = np.random.default_rng(0)
+        found = []
+        for seed in [seed_q] + [rng.uniform(self.lower, self.upper) for _ in range(tries)]:
+            q, error = self.solve(seed, position, quat)
+            if error < 1e-3 and not self.collides(q) and not any(np.abs(q - other).max() < 0.1 for other in found):
+                found.append(q)
+        return sorted(found, key=lambda c: np.abs(c - seed_q).sum())
+
+    def collides(self, q, joint=None, value=0.0):
+        """True if the arm at joints q touches anything but itself; `joint` is a qpos address set to `value`."""
         model, data = self.model, self.ik_data
         data.qpos[:] = self.scene.data.qpos
         data.qpos[self.scene.arm_q] = q
+        if joint is not None:
+            data.qpos[joint] = value
         mujoco.mj_forward(model, data)
         for i in range(data.ncon):
             names = [model.body(model.geom_bodyid[g]).name for g in (data.contact.geom1[i], data.contact.geom2[i])]
-            if sum(n.startswith("panda_") for n in names) == 1 and not any(n in ROBOT_BODIES for n in names):
+            if sum(n.startswith("panda_") for n in names) == 1:
                 return True
         return False
+
+    def free_joint_path(self, start, goal, steps=30):
+        return not any(self.collides(start + (goal - start)*t) for t in np.linspace(0, 1, steps))
+
+    def route(self, start, goal):
+        """Collision-free joint waypoints from start to goal: direct, or through a ready pose."""
+        if self.free_joint_path(start, goal):
+            return [goal]
+        for ready in READY_POSES:
+            ready = np.array(ready)
+            if not self.collides(ready) and self.free_joint_path(start, ready) and self.free_joint_path(ready, goal):
+                return [ready, goal]
+        return None
+
+    def joint_move(self, goal, steps=60):
+        scene = self.scene
+        start = scene.data.qpos[scene.arm_q].copy()
+        for t in np.linspace(0, 1, steps)[1:]:
+            scene.data.ctrl[scene.arm_ctrl] = start + (goal - start)*t
+            scene.step(0, 0, None, self.gripper)
+        self.hold(20)
 
     def reach(self, position, quat, tries=60, seed=0):
         """Joint-space move to the nearest IK solution whose straight joint path is collision free."""
@@ -99,11 +137,8 @@ class Arm:
             if error < 1e-3:
                 candidates.append(q)
         for q in sorted(candidates, key=lambda c: np.abs(c - current).sum()):
-            if not any(self.collides(current + (q - current)*t) for t in np.linspace(0, 1, 30)):
-                for t in np.linspace(0, 1, 60)[1:]:
-                    scene.data.ctrl[scene.arm_ctrl] = current + (q - current)*t
-                    scene.step(0, 0, None, self.gripper)
-                self.hold(20)
+            if self.free_joint_path(current, q):
+                self.joint_move(q)
                 return
         raise RuntimeError(f"no collision-free joint path to {position}")
 
@@ -214,24 +249,201 @@ def drawer(seed):
     return result
 
 
+def rotate_about(axis, angle):
+    k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    return np.eye(3) + np.sin(angle)*k + (1 - np.cos(angle))*k @ k
+
+
+def moved_handle(scene, articulation, joint_name):
+    """f(q) -> (position, rotation) of the handle after the joint moves by q from now."""
+    position, rotation, _ = scene.handle_pose(articulation, joint_name)
+    joint = scene.model.joint(f"{articulation}/{joint_name}").id
+    axis, anchor = scene.data.xaxis[joint].copy(), scene.data.xanchor[joint].copy()
+    if scene.model.jnt_type[joint] == mujoco.mjtJoint.mjJNT_SLIDE:
+        return lambda q: (position + axis*q, rotation)
+    return lambda q: (anchor + rotate_about(axis, q) @ (position - anchor), rotate_about(axis, q) @ rotation)
+
+
+def grasp_rotation(rotation, angle):
+    """Hand frame on a bar with pose `rotation` (x along the bar, z out of the panel), pitched about the bar."""
+    c, s_ = np.cos(angle), np.sin(angle)
+    pitched = rotation @ np.array([[1, 0, 0], [0, c, -s_], [0, s_, c]])
+    return np.stack([pitched[:, 0], np.cross(-pitched[:, 2], pitched[:, 0]), -pitched[:, 2]], axis=1)
+
+
+def follow(arm, moved, target, address, q, pitch):
+    """Chain IK along the drag, turning the grasp about the round bar where a fixed grasp cannot follow."""
+    path = []
+    for value in np.linspace(0, target, DRAG_SAMPLES + 1)[1:]:
+        position, rotation = moved(value)
+        for change in np.radians([0, 3, -3, 6, -6, 10, -10]):
+            if abs(pitch + change) > np.radians(MAX_PITCH):
+                continue
+            candidate, error = arm.solve(q, position, quat_of(grasp_rotation(rotation, pitch + change)))
+            if error < 1e-3 and np.abs(candidate - q).max() < 0.25 and not arm.collides(candidate, address, value):
+                q, pitch = candidate, pitch + change
+                path.append(q)
+                break
+        else:
+            break
+    return path
+
+
+def plan_drag(arm, moved, target, address):
+    """(route to pre-grasp, grasp joints, drag joints) reaching furthest along the drag; fingers open around the bar."""
+    scene = arm.scene
+    current = scene.data.qpos[scene.arm_q].copy()
+    best, best_length = None, -1
+    position, rotation = moved(0.0)
+    for angle in np.radians([0, 20, -20, 40, -40, 60, -60]):
+        hand = grasp_rotation(rotation, angle)
+        quat = quat_of(hand)
+        for grasp in arm.solutions(position, quat, current):
+            pre, error = arm.solve(grasp, position - hand[:, 2]*0.10, quat)
+            clear = error < 1e-3 and not arm.collides(pre) and arm.free_joint_path(pre, grasp)
+            route = arm.route(current, pre) if clear else None
+            if route is None:
+                continue
+            path = follow(arm, moved, target, address, grasp, angle)
+            if len(path) > best_length:
+                best, best_length = (route, grasp, path), len(path)
+            if best_length == DRAG_SAMPLES:
+                return best
+    return best
+
+
+def actuate(start, articulation, joint_name, target, seed=0):
+    """Open `joint_name` to `target`, then close it; checks the joint and that nothing else moved."""
+    scene = MujocoScene("kitchen", "wheels", start)
+    scene.reset(seed)
+    data = scene.data
+    arm = Arm(scene)
+    arm.hold(SETTLE_HOLD)
+    address = scene.articulations[articulation][joint_name]
+    before = {name: scene.pose(body)[0] for name, body in scene.objects.items()}
+    moved = moved_handle(scene, articulation, joint_name)
+    hinge = scene.model.jnt_type[scene.model.joint(f"{articulation}/{joint_name}").id] == mujoco.mjtJoint.mjJNT_HINGE
+    plan = plan_drag(arm, moved, target + (HINGE_OVERSHOOT if hinge else SLIDE_OVERSHOOT), address)
+    result = dict(joint=f"{articulation}/{joint_name}", target=target)
+    if plan is None or len(plan[2]) < DRAG_SAMPLES:
+        scene.close()
+        return dict(result, success=False, reachable=0.0 if plan is None else round(len(plan[2]) / DRAG_SAMPLES, 2),
+                    message="no collision-free drag from this base pose")
+    route, grasp, path = plan
+    for waypoint in route:
+        arm.joint_move(waypoint)
+    position, rotation = moved(0.0)
+    arm.go(position, scene.tcp_pose()[1], step_m=0.003)
+    arm.hold(30, SQUEEZE)
+    gap = float(scene.joint_positions()[-2:].sum())
+    base_start = scene.pose(scene.chassis)[0]
+    offset = 0.0
+
+    def drag(waypoints):
+        nonlocal offset
+        for q in waypoints:
+            data.ctrl[scene.arm_ctrl] = q
+            for _ in range(DRAG_STEPS):
+                scene.step(0, 0, None, arm.gripper)
+            offset = max(offset, float(np.linalg.norm(scene.tcp_pose()[0] - scene.handle_pose(articulation, joint_name)[0])))
+        arm.hold(15)
+
+    drag(path)
+    opened = float(data.qpos[address])
+    drag([*path[::-1], grasp])
+    closed = float(data.qpos[address])
+    gap_end = float(scene.joint_positions()[-2:].sum())
+    arm.hold(20, OPEN)
+    arm.joint_move(route[-1], steps=40)
+    disturbed = {name: round(float(np.linalg.norm(scene.pose(body)[0] - before[name])), 3) for name, body in scene.objects.items()
+                 if np.linalg.norm(scene.pose(body)[0] - before[name]) > 0.02}
+    tolerance = 0.02 if target < 0.3 else 0.05
+    result.update(opened=round(opened, 3), closed=round(closed, 3), finger_gap_m=round(gap, 4), finger_gap_end_m=round(gap_end, 4),
+                  handle_offset_m=round(offset, 4), base_drift_m=round(float(np.linalg.norm(scene.pose(scene.chassis)[0] - base_start)), 4),
+                  disturbed=disturbed, success=bool(opened > target - tolerance and abs(closed) < 0.03 and not disturbed))
+    scene.close()
+    return result
+
+
+def collision_points(scene, body):
+    model, data = scene.model, scene.data
+    points = []
+    for geom in range(model.ngeom):
+        if model.geom_bodyid[geom] == body and model.geom_contype[geom] and model.geom_type[geom] == mujoco.mjtGeom.mjGEOM_MESH:
+            mesh = model.geom_dataid[geom]
+            start, count = model.mesh_vertadr[mesh], model.mesh_vertnum[mesh]
+            points.append(data.geom_xpos[geom] + model.mesh_vert[start:start + count] @ data.geom_xmat[geom].reshape(3, 3).T)
+    return np.concatenate(points)
+
+
+def pick_prop(scene, arm, name):
+    body = scene.objects[name]
+    points = collision_points(scene, body)
+    centre = (points.max(0) + points.min(0)) / 2
+    low, high = points[:, 2].min(), points[:, 2].max()
+    flat = points[:, :2] - points[:, :2].mean(0)
+    _, vectors = np.linalg.eigh(flat.T @ flat)
+    narrow = vectors[:, 0]
+    grasp = np.array([centre[0], centre[1], max(high - 0.04, low + 0.5*(high - low), low + 0.012)])
+    before = {n: scene.pose(b)[0] for n, b in scene.objects.items()}
+    current = scene.data.qpos[scene.arm_q].copy()
+    # Either finger can take either side: use the one needing the smaller wrist turn.
+    options = [down_quat(np.arctan2(n[0], -n[1])) for n in (narrow, -narrow)]
+    top_down = min(options, key=lambda quat: min((np.abs(q - current).sum() for q in arm.solutions(grasp + [0, 0, 0.12], quat, current, tries=12)),
+                                                 default=np.inf))
+    arm.reach(grasp + [0, 0, 0.12], top_down, tries=30)
+    arm.go(grasp, top_down)
+    arm.hold(30, SQUEEZE)
+    gap = float(scene.joint_positions()[-2:].sum())
+    arm.go(grasp + [0, 0, LIFT], top_down)
+    arm.hold(HOLD_STEPS)
+    risen = float(scene.pose(body)[0][2] - before[name][2])
+    disturbed = {n: round(float(np.linalg.norm(scene.pose(b)[0] - before[n])), 3) for n, b in scene.objects.items()
+                 if n != name and np.linalg.norm(scene.pose(b)[0] - before[n]) > 0.02}
+    arm.go(grasp + [0, 0, 0.004], top_down)
+    arm.hold(30, OPEN)
+    arm.go(grasp + [0, 0, 0.14], top_down, step_m=0.01)
+    return dict(object=name, lifted_m=round(risen, 4), finger_gap_m=round(gap, 4), disturbed=disturbed, success=bool(risen > LIFT*0.9 and not disturbed))
+
+
+def kitchen():
+    results = []
+    scene = MujocoScene("kitchen", "wheels", (-2.95, -1.15, 3.1416))
+    scene.reset(0)
+    arm = Arm(scene)
+    # The stowed hand hangs over the console from this base pose, low enough to touch the tall boxes.
+    arm.joint_move(np.array(READY_POSES[0]))
+    results += [pick_prop(scene, arm, name) for name in ("sugar_box", "pear", "lemon")]
+    scene.close()
+    results.append(actuate((-1.17, 1.86, 1.989), "kitchen_counter", "middle_slide_top", 0.25))
+    results.append(actuate((-2.899, 1.86, 1.153), "kitchen_counter", "left_slide_top", 0.25))
+    results.append(actuate((0.249, 1.492, 1.107), "fridge", "top_door_hinge", 0.6))
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--kitchen-only", action="store_true")
     args = parser.parse_args()
     report = []
-    for seed in args.seeds:
+    for seed in [] if args.kitchen_only else args.seeds:
         item = dict(seed=seed, pick=pick(seed), drawer=drawer(seed))
         report.append(item)
         print(json.dumps(item), flush=True)
     picks = [r for item in report for r in item["pick"].values()]
     summary = dict(pick=f"{sum(r['success'] for r in picks)}/{len(picks)}",
                    drawer=f"{sum(i['drawer']['success'] for i in report)}/{len(report)}")
+    rooms = kitchen()
+    for item in rooms:
+        print(json.dumps(item), flush=True)
+    summary["kitchen"] = f"{sum(r['success'] for r in rooms)}/{len(rooms)}"
     print(json.dumps(summary))
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(dict(summary=summary, runs=report), indent=2), encoding="utf-8")
-    return 0 if all(r["success"] for r in picks) and all(i["drawer"]["success"] for i in report) else 1
+        args.report.write_text(json.dumps(dict(summary=summary, runs=report, kitchen=rooms), indent=2), encoding="utf-8")
+    return 0 if all(r["success"] for r in [*picks, *rooms]) and all(i["drawer"]["success"] for i in report) else 1
 
 
 if __name__ == "__main__":

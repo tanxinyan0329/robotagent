@@ -1,4 +1,5 @@
 """Classical manipulation skills in the kitchen scene: pick / place, open / close drawers and doors.
+ManiSkill by default; --backend mujoco runs the same skills on MuJoCo (interpreter with mujoco and mplib).
 
 Each scenario parks the robot at a fixed base pose (navigation is not part of these skills) and runs a
 skill sequence. Every step is checked: skill success, plus any other object moved > 2 cm.
@@ -19,14 +20,11 @@ import time
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import gymnasium as gym  # noqa: E402
-
 from mobile_panda_sim.manipulation.skills import ManipulationSkills  # noqa: E402
-from mobile_panda_sim.scenes import SCENES  # noqa: E402
 
 SCENARIOS = {
     "drawer": [
-        ((-1.17, 1.86, 1.989), [("open", "kitchen_counter", "middle_slide_top"), ("close", "kitchen_counter", "middle_slide_top"), ("home",)]),
+        ((-1.15, 1.83, 1.989), [("open", "kitchen_counter", "middle_slide_top"), ("close", "kitchen_counter", "middle_slide_top"), ("home",)]),
         ((-2.899, 1.86, 1.153), [("open", "kitchen_counter", "left_slide_top"), ("close", "kitchen_counter", "left_slide_top"), ("home",)]),
     ],
     "pickplace": [
@@ -45,43 +43,78 @@ class WindowClosed(Exception):
     pass
 
 
-def make_env(args):
-    return gym.make(SCENES["kitchen"], robot_uids=f"mobile_panda_{args.base}", obs_mode="none",
-                    control_mode="pd_joint_delta_pos", sim_backend="physx_cpu", reward_mode="none",
-                    render_mode="human" if args.viewer else "rgb_array")
+class ManiSkillRun:
+    def __init__(self, args):
+        import gymnasium as gym
+        from mobile_panda_sim.scenes import SCENES
+        self.args = args
+        self.env = gym.make(SCENES["kitchen"], robot_uids=f"mobile_panda_{args.base}", obs_mode="none",
+                            control_mode="pd_joint_delta_pos", sim_backend="physx_cpu", reward_mode="none",
+                            render_mode="human" if args.viewer else "rgb_array")
+        self.w = self.env.unwrapped
+
+    def skills(self, start, on_step):
+        self.w.start = tuple(start)
+        self.env.reset(seed=0)
+        return ManipulationSkills(self.w, on_step=on_step, on_idle=self.show if self.args.viewer else None)
+
+    def show(self):
+        """Refresh the viewer window (also processes mouse / keyboard input)."""
+        viewer = self.w._viewer
+        if viewer is not None and viewer.closed:
+            raise WindowClosed
+        self.w.render()
+
+    def frame(self):
+        return self.w.render()[0].cpu().numpy()
+
+    def close(self):
+        self.env.close()
 
 
-def show(w):
-    """Refresh the viewer window (also processes mouse / keyboard input)."""
-    viewer = w._viewer
-    if viewer is not None and viewer.closed:
-        raise WindowClosed
-    w.render()
+class MujocoRun:
+    def __init__(self, args):
+        from mobile_panda_sim.mj.sim import MujocoScene
+        from mobile_panda_sim.mj.world import MujocoWorld
+        self.scene = MujocoScene("kitchen", args.base, viewer=args.viewer)
+        self.world = MujocoWorld(self.scene)
+
+    def skills(self, start, on_step):
+        self.scene.reset(0, start)
+        return ManipulationSkills(self.world, on_step=on_step, on_idle=self.show if self.scene.viewer else None)
+
+    def show(self):
+        if self.scene.viewer is not None and not self.scene.viewer.is_running():
+            raise WindowClosed
+
+    def frame(self):
+        return self.scene.capture_rgb()["base_camera"]
+
+    def close(self):
+        self.scene.close()
 
 
-def run(env, start, steps, args, record=None):
-    """One scenario on an existing env: park the robot at `start` (reset), run the skill steps."""
-    w = env.unwrapped
-    w.start = tuple(start)
-    env.reset(seed=0)
+def run(sim, start, steps, args, record=None):
+    """One scenario: park the robot at `start` (reset), run the skill steps."""
     frames = []
 
     def on_step():
         if args.viewer:
-            show(w)
+            sim.show()
         elif record is not None and skills.steps % 2 == 0:
-            frames.append(w.render()[0].cpu().numpy())
-    skills = ManipulationSkills(w, on_step=on_step, on_idle=(lambda: show(w)) if args.viewer else None)
+            frames.append(sim.frame())
+    skills = sim.skills(start, on_step)
+    world = skills.world
     results, target = [], None
     for step in steps:
         name, *params = step
-        before = {n: a.pose.p[0].numpy().copy() for n, a in w.movable_objects.items()}
+        before = world.object_positions()
         target = params[0] if name == "pick" else target
         t = time.time()
         result = skills.place(params) if name == "place" else getattr(skills, name)(*params)
-        moved = {n: round(float(np.linalg.norm(a.pose.p[0].numpy() - before[n])), 3)
-                 for n, a in w.movable_objects.items()
-                 if n not in SETTLING and n != target and np.linalg.norm(a.pose.p[0].numpy() - before[n]) > 0.02}
+        after = world.object_positions()
+        moved = {n: round(float(np.linalg.norm(after[n] - before[n])), 3) for n in after
+                 if n not in SETTLING and n != target and np.linalg.norm(after[n] - before[n]) > 0.02}
         record_ = dict(step=":".join(map(str, step)), success=result.success, message=result.message,
                        disturbed=moved, seconds=round(time.time() - t, 1), info=result.info)
         results.append(record_)
@@ -96,6 +129,7 @@ def run(env, start, steps, args, record=None):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("scenario", choices=[*SCENARIOS, "all"])
+    p.add_argument("--backend", choices=("maniskill", "mujoco"), default="maniskill")
     p.add_argument("--base", choices=("wheels", "planar"), default="wheels")
     p.add_argument("--repeat", type=int, default=1)
     p.add_argument("--viewer", action="store_true")
@@ -104,24 +138,24 @@ def main():
     args = p.parse_args()
     names = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     report, first = [], True
-    env = make_env(args)
+    sim = (MujocoRun if args.backend == "mujoco" else ManiSkillRun)(args)
     try:
         for name in names:
             for start, steps in SCENARIOS[name]:
                 for i in range(args.repeat):
-                    results = run(env, start, steps, args, record=args.record if first else None)
+                    results = run(sim, start, steps, args, record=args.record if first else None)
                     first = False
                     ok = all(r["success"] and not r["disturbed"] for r in results)
                     report.append(dict(scenario=name, start=start, run=i, ok=ok, steps=results))
         if args.viewer:
             print("done; close the viewer window to exit", flush=True)
             while True:
-                show(env.unwrapped)
+                sim.show()
                 time.sleep(1 / 60)
     except (WindowClosed, KeyboardInterrupt):
         print("viewer closed; stopping", flush=True)
     finally:
-        env.close()
+        sim.close()
     summary = {}
     for r in report:
         for s in r["steps"]:

@@ -5,22 +5,14 @@ import time
 
 import mplib
 import numpy as np
-import sapien
-import trimesh
 
-from mani_skill import PACKAGE_ASSET_DIR
-from mani_skill.utils.geometry.trimesh_utils import get_component_meshes
+from .pose import Pose
 
-PANDA_URDF = Path(PACKAGE_ASSET_DIR) / "robots/panda/panda_v2.urdf"
-ARM_JOINTS = [f"panda_joint{i}" for i in range(1, 8)]
+PANDA_URDF = Path(__file__).resolve().parent / "panda/panda_v2.urdf"
 CLOUD_RADIUS = 1.25
 CLOUD_DENSITY = 8000
 IDLE_PERIOD = 1 / 30
 CLOUD_POINT_RADIUS = 0.015
-
-
-def to_pose(p, q=(1, 0, 0, 0)):
-    return sapien.Pose(np.asarray(p, dtype=np.float64), np.asarray(q, dtype=np.float64))
 
 
 def _slerp(q0, q1, t):
@@ -36,29 +28,22 @@ def _slerp(q0, q1, t):
     return q / np.linalg.norm(q)
 
 
-def pose_from_axes(position, approach, closing):
-    """TCP pose from the gripper approach direction (TCP +z) and finger closing direction (TCP +y)."""
-    z = np.asarray(approach, float); z /= np.linalg.norm(z)
-    y = np.asarray(closing, float); y = y - z * (y @ z); y /= np.linalg.norm(y)
-    x = np.cross(y, z)
-    m = np.eye(4); m[:3, 0], m[:3, 1], m[:3, 2], m[:3, 3] = x, y, z, position
-    return sapien.Pose(m)
-
-
 def planner_description():
     """Panda URDF/SRDF for mplib with the mobile base (pedestal + chassis boxes) fixed under panda_link0,
     so arm-vs-own-base collisions are self-collisions. Written to outputs/planner/."""
     from ..geometry import HEIGHT
-    from ..paths import OUTPUTS
+    from ..paths import DESCRIPTION, OUTPUTS
     pillar = HEIGHT - 0.27
     out = OUTPUTS / "planner"
     out.mkdir(parents=True, exist_ok=True)
     meshes = out / "franka_description"
-    if not meshes.exists():
-        try:
-            meshes.symlink_to(PANDA_URDF.parent / "franka_description", target_is_directory=True)
-        except FileExistsError:
-            pass
+    if meshes.is_symlink():
+        meshes.unlink(missing_ok=True)
+    (meshes).mkdir(exist_ok=True)
+    try:
+        (meshes / "meshes").symlink_to(DESCRIPTION / "meshes/franka", target_is_directory=True)
+    except FileExistsError:
+        pass
     urdf = PANDA_URDF.read_text()
     pad = 0.01
     base = f"""
@@ -83,19 +68,14 @@ def planner_description():
 
 
 class ArmPlanner:
-    def __init__(self, env, joint_vel_limit=0.8, joint_acc_limit=1.5):
-        self.env = env
-        self.agent = env.agent
-        self.robot = env.agent.robot
-        self.dt = float(env.control_timestep)
+    def __init__(self, world, joint_vel_limit=0.8, joint_acc_limit=1.5):
+        self.world = world
+        self.dt = world.control_timestep
         urdf = planner_description()
         self.planner = mplib.Planner(
             urdf=str(urdf), srdf=str(urdf.with_suffix(".srdf")), move_group="panda_hand_tcp",
             joint_vel_limits=np.full(7, joint_vel_limit), joint_acc_limits=np.full(7, joint_acc_limit))
         self.planner.set_base_pose(np.array([0, 0, 0, 1, 0, 0, 0], dtype=np.float64))
-        names = [j.name for j in self.robot.get_active_joints()]
-        self.arm_ids = [names.index(n) for n in ARM_JOINTS]
-        self.finger_ids = [names.index(n) for n in self.agent.gripper_joint_names]
         self.cloud_ready = False
         self.idle = None
         self._last_idle = 0.0
@@ -113,23 +93,21 @@ class ArmPlanner:
         reachability from a base pose the robot is not at yet."""
         if getattr(self, "virtual_base", None) is not None:
             return self.virtual_base
-        return self.robot.links_map["panda_link0"].pose.sp
+        return self.world.link0_pose()
 
     def link0_at(self, x, y, yaw):
         """panda_link0 world pose if the chassis were parked at (x, y, yaw)."""
-        live = self.robot.links_map["panda_link0"].pose.sp
-        return sapien.Pose([x, y, live.p[2]], [np.cos(yaw/2), 0, 0, np.sin(yaw/2)])
+        return Pose([x, y, self.world.link0_pose().p[2]], [np.cos(yaw/2), 0, 0, np.sin(yaw/2)])
 
     def to_base(self, world_pose):
         return self.base_pose().inv() * world_pose
 
     def tcp_pose(self):
-        return self.agent.tcp.pose.sp
+        return self.world.tcp_pose()
 
     def qpos(self):
         """Planner qpos: 7 arm joints + 2 fingers (mplib order)."""
-        q = self.robot.get_qpos()[0].cpu().numpy()
-        return np.concatenate([q[self.arm_ids], q[self.finger_ids]]).astype(np.float64)
+        return self.world.qpos()
 
     @staticmethod
     def _vec(pose):
@@ -149,36 +127,8 @@ class ArmPlanner:
     def build_cloud(self, exclude=(), clear=None):
         """Sample the scene's collision geometry near the arm into the planner's point cloud."""
         base = self.base_pose()
-        origin = base.p
         inv = base.inv().to_transformation_matrix()
-        robot_bodies = {link._objs[0].entity for link in self.robot.links}
-        points = []
-        bodies = []
-        for actor in self.env.scene.actors.values():
-            bodies.append((actor.name, actor._objs[0]))
-        for art in self.env.scene.articulations.values():
-            if art is self.robot:
-                continue
-            for link in art.links:
-                bodies.append((link.name, link._objs[0].entity))
-        for name, entity in bodies:
-            self.tick()
-            if name in exclude or entity in robot_bodies:
-                continue
-            for component in entity.components:
-                if not hasattr(component, "get_collision_shapes"):
-                    continue
-                for mesh in get_component_meshes(component):
-                    mesh.apply_transform(entity.pose.to_transformation_matrix())
-                    lo, hi = mesh.bounds
-                    nearest = np.clip(origin, lo, hi)
-                    if np.linalg.norm(nearest - origin) > CLOUD_RADIUS:
-                        continue
-                    n = int(min(max(mesh.area * CLOUD_DENSITY, 50), 200000))
-                    pts, _ = trimesh.sample.sample_surface(mesh, n)
-                    pts = pts[np.linalg.norm(pts - origin, axis=1) < CLOUD_RADIUS]
-                    points.append(pts)
-        cloud = np.concatenate(points) if points else np.zeros((0, 3))
+        cloud = self.world.surface_points(exclude, base.p, CLOUD_RADIUS, CLOUD_DENSITY, self.tick)
         if clear is not None:
             cloud = cloud[np.linalg.norm(cloud - np.asarray(clear[0]), axis=1) > clear[1]]
         cloud = cloud @ inv[:3, :3].T + inv[:3, 3]
@@ -253,7 +203,7 @@ class ArmPlanner:
         model = self.planner.robot.get_pinocchio_model()
         model.compute_forward_kinematics(np.concatenate([q7, self.qpos()[7:]]))
         pose = model.get_link_pose(self.planner.move_group_link_id)
-        return self.base_pose() * sapien.Pose(pose[:3], pose[3:])
+        return self.base_pose() * Pose(pose[:3], pose[3:])
 
     def link_positions(self, q7, links=("panda_link3", "panda_link4", "panda_link5", "panda_link6", "panda_link7")):
         """World positions of arm link origins for joints q7 (for cheap clearance checks)."""
@@ -281,7 +231,7 @@ class ArmPlanner:
         n = max(2, int(max(distance / step, angle / 0.05)) + 1)
         seed, path = self.qpos()[:7], [self.qpos()[:7]]
         for t in np.linspace(0, 1, n)[1:]:
-            pose = sapien.Pose(start.p + (world_pose.p - start.p) * t, _slerp(start.q, world_pose.q, t))
+            pose = Pose(start.p + (world_pose.p - start.p) * t, _slerp(start.q, world_pose.q, t))
             solutions = self.ik(pose, seed=seed, n_init=6)
             if not solutions or np.abs(solutions[0] - seed).max() > max_jump:
                 return None

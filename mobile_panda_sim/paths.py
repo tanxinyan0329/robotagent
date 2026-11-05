@@ -6,6 +6,7 @@ DESCRIPTION = REPO / "ros2_ws/src" / PACKAGE
 CHECKPOINTS = REPO / "skills/checkpoints"
 OUTPUTS = REPO / "outputs"
 MENAGERIE_PANDA = REPO / "assets/mujoco_menagerie/franka_emika_panda"
+MUJOCO_KITCHEN = REPO / "assets/mujoco_kitchen"
 
 
 def ros_urdf(mode):

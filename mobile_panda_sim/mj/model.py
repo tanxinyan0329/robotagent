@@ -31,6 +31,7 @@ CAMERA_AXES = np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]], dtype=np.float64)
 
 # Per finger, as in ManiSkill's Panda; the actuator drives the mean of both fingers, so it needs twice the gains.
 FINGER_STIFFNESS, FINGER_DAMPING = 1000.0, 100.0
+FINGER_FRICTION = 1.15   # ManiSkill averages the finger's 2.0 with the default 0.3
 ARM_JOINTS = [f"panda_joint{i}" for i in range(1, 8)]
 FINGER_JOINTS = ["panda_finger_joint1", "panda_finger_joint2"]
 REST_POSITIONS = dict(zip(ARM_JOINTS + FINGER_JOINTS, ARM_REST))
@@ -77,6 +78,9 @@ def load_panda():
     gripper.biasprm[1:3] = [-FINGER_STIFFNESS * 2, -FINGER_DAMPING * 2]
     gripper.ctrlrange = GRIPPER_RANGE
     spec.body("panda_hand").add_site(name="tcp", pos=[0, 0, TCP_OFFSET])
+    for finger in ("panda_leftfinger", "panda_rightfinger"):
+        for geom in spec.body(finger).geoms:
+            geom.friction[0], geom.priority = FINGER_FRICTION, 1
     return spec
 
 
@@ -146,6 +150,8 @@ def add_robot(spec, base, x, y, z, yaw):
     add_link_geoms(body, links[root_name])
     if base == "wheels":
         body.add_freejoint(name="root")
+    else:
+        body.mocap = True   # a fixed base MuJoCo would cache; reset() can still park it elsewhere
     add_children(body, root_name)
     add_cameras(spec, root)
 
@@ -176,6 +182,11 @@ def add_cameras(spec, root):
 def add_tabletop(spec):
     world = spec.worldbody
     box = mujoco.mjtGeom.mjGEOM_BOX
+    spec.add_texture(name="floor", type=mujoco.mjtTexture.mjTEXTURE_2D, builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
+                     rgb1=[0.42, 0.44, 0.47], rgb2=[0.36, 0.38, 0.41], width=256, height=256)
+    material = spec.add_material(name="floor", texrepeat=[10, 10], reflectance=0.0)
+    material.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "floor"
+    world.add_light(pos=[0, 0, 4 - HEIGHT], dir=[0.1, 0.2, -1], castshadow=True, diffuse=[0.8, 0.8, 0.8])
     world.add_geom(name="ground", type=mujoco.mjtGeom.mjGEOM_PLANE, size=[8, 8, 0.1], pos=[0, 0, -HEIGHT], material="floor")
     world.add_geom(name="table", type=box, size=[*TABLE_HALF, 0.035], pos=[*TABLE_CENTER, -0.035], rgba=[0.55, 0.36, 0.20, 1])
     for i, (x, y) in enumerate(TABLE_LEGS):
@@ -190,27 +201,23 @@ def add_tabletop(spec):
         body.add_geom(type=box, size=[CUBE_HALF]*3, rgba=CUBE_COLORS[name], density=1000)
 
 
-def add_environment(spec, floor_z):
+def add_environment(spec):
+    spec.compiler.degree = False
     spec.option.timestep = TIMESTEP
     spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
     spec.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
     spec.option.impratio = 10
+    spec.option.enableflags |= mujoco.mjtEnableBit.mjENBL_MULTICCD
     spec.visual.global_.offwidth, spec.visual.global_.offheight = BASE_CAMERA_SIZE
     spec.visual.headlight.ambient = [0.35, 0.35, 0.35]
     spec.visual.headlight.diffuse = [0.4, 0.4, 0.4]
-    spec.add_texture(name="floor", type=mujoco.mjtTexture.mjTEXTURE_2D, builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
-                     rgb1=[0.42, 0.44, 0.47], rgb2=[0.36, 0.38, 0.41], width=256, height=256)
-    material = spec.add_material(name="floor", texrepeat=[10, 10], reflectance=0.0)
-    material.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "floor"
-    spec.worldbody.add_light(pos=[0, 0, floor_z + 4], dir=[0.1, 0.2, -1], castshadow=True, diffuse=[0.8, 0.8, 0.8])
 
 
-def build(scene, base, start, extend=None):
-    """Compiled (model, spec) of `scene` with the robot parked at start = (x, y, yaw); extend(spec) adds bodies."""
+def build(add_scene, floor_z, base, start, extend=None):
+    """Compiled (model, spec): add_scene(spec) plus the robot parked at start = (x, y, yaw); extend(spec) adds bodies."""
     spec = mujoco.MjSpec()
-    floor_z = -HEIGHT
-    add_environment(spec, floor_z)
-    add_tabletop(spec)
+    add_environment(spec)
+    add_scene(spec)
     if extend is not None:
         extend(spec)
     add_robot(spec, base, start[0], start[1], floor_z + ROOT_ABOVE_FLOOR[base], start[2])
