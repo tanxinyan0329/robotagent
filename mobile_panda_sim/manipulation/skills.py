@@ -1,5 +1,4 @@
 """Classical manipulation skills: IK + motion planning + scripted steps, no learning."""
-from dataclasses import dataclass, field
 import math
 
 import numpy as np
@@ -7,6 +6,7 @@ import numpy as np
 from ..geometry import ARM_REST, MAX_JOINT_DELTA
 from .planner import ArmPlanner
 from .pose import Pose, pose_from_axes
+from .result import SkillResult
 
 GRIPPER_OPEN, GRIPPER_CLOSED = 1.0, -1.0
 MAX_FINGER_SPAN = 0.075
@@ -16,16 +16,6 @@ CONTACT_JOINT_STEP = 0.015
 HAND_CLEARANCE = 0.008
 SEARCH_REACH = 1.2
 BAND_WIDTH = 0.1
-
-
-@dataclass
-class SkillResult:
-    success: bool
-    message: str = ""
-    info: dict = field(default_factory=dict)
-
-    def __bool__(self):
-        return self.success
 
 
 class SkillError(RuntimeError):

@@ -283,6 +283,6 @@ def test_trained_policies_run_on_the_robot():
     scene = MujocoScene("planar", DOCK)
     scene.reset()
     skills = RLSkills(scene)
-    assert skills.pick_move("lemon", np.array([-3.40, -1.50, TABLE_Z + 0.15]))["success"]
-    assert skills.place((-3.34, -1.56))["success"]
+    assert skills.pick_move("lemon", np.array([-3.40, -1.50, TABLE_Z + 0.15])).success
+    assert skills.place((-3.34, -1.56)).success
     scene.close()

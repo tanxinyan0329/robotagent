@@ -8,6 +8,10 @@
 
 机器可读的目录：`catalog.json`、`external_skills.json`。
 
+所有技能都返回 `SkillResult`：`success`、`message`（失败原因）、`info`（步数等细节），可以直接用在 `if` 里。
+
+要抓放物品、开关抽屉和柜门，先用传统方法技能。强化学习技能用来学习和对比训练方法。
+
 ## 适用范围
 
 选技能前先看这张表。所有技能都读仿真真值，不经过相机；执行时底盘必须停稳。
@@ -48,8 +52,8 @@ import numpy as np
 scene = MujocoScene("wheels", DOCK)
 scene.reset()
 skills = RLSkills(scene)
-skills.pick_move("pear", np.array([-3.40, -1.50, TABLE_Z + 0.15]))     # 目标是物体中心的世界坐标
-skills.place((-3.34, -1.56))                                           # 台面上的 (x, y)
+if skills.pick_move("pear", np.array([-3.40, -1.50, TABLE_Z + 0.15])):   # 目标是物体中心的世界坐标
+    skills.place((-3.34, -1.56))                                         # 台面上的 (x, y)
 ```
 
 轮式底盘从充电位出发，导航、拿起、移动、放下全流程的实测，每个物体 20 次，物体和目标位置随机：
@@ -65,5 +69,9 @@ skills.place((-3.34, -1.56))                                           # 台面�
 ## catalog.json 字段
 
 - `kind`：`classical`（传统方法）或 `rl`（强化学习）
-- `applies_to`、`not_for`：能做和不能做的事
+- `call`、`code`、`demo`、`docs`：怎么调用、代码、例程、说明
+- `checkpoint`、`training`：权重和训练脚本，只有强化学习技能有
+- `applies_to`、`not_for`、`preconditions`：能做的事、不能做的事、前提条件
 - `validated`：实测结果、判据和运行环境
+
+`tests/test_catalog.py` 检查目录和代码是否一致，新增技能时要同步更新。

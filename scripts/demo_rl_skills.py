@@ -89,12 +89,13 @@ def main():
         spot = free_spot(rng, scene, name)
         goal = np.array([spot[0], spot[1], TABLE_Z + HOLD_HEIGHT])
         pick = skills.pick_move(name, goal, on_step)
-        place = skills.place(free_spot(rng, scene, name), on_step) if pick["success"] else dict(success=False, skipped=True)
-        record = dict(episode=episode, object=name, start=centre.round(3).tolist(), base=base_pose(scene).round(3).tolist(), pick_move=pick, place=place)
+        place = skills.place(free_spot(rng, scene, name), on_step) if pick else None
+        record = dict(episode=episode, object=name, start=centre.round(3).tolist(), base=base_pose(scene).round(3).tolist(),
+                      pick_move=vars(pick), place=vars(place) if place else None)
         results.append(record)
         print(json.dumps(record), flush=True)
     picks = sum(r["pick_move"]["success"] for r in results)
-    places = sum(r["place"]["success"] for r in results)
+    places = sum(bool(r["place"] and r["place"]["success"]) for r in results)
     print(json.dumps(dict(episodes=len(results), pick_move=picks, place=places)), flush=True)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

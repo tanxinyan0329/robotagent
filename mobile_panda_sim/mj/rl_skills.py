@@ -8,6 +8,7 @@ from torch import nn
 
 from ..geometry import GRIPPER_RANGE, MAX_JOINT_DELTA
 from ..manipulation.pose import Pose
+from ..manipulation.result import SkillResult
 from ..paths import POLICIES
 from .rl_tasks import (ACTION_SIZE, AT_GOAL, DISTURBED, DOCK, HAND_ABOVE, MAX_STEPS, NEIGHBOURS, OBS_SIZE, OPEN_GAP, STILL, TABLE_Z, TARGETS,
                        body_box, body_geoms, is_grasped)
@@ -91,6 +92,16 @@ class RLSkills:
         now = self.neighbours()
         return {n: round(float(np.linalg.norm(now[n] - before[n])), 3) for n in now if np.linalg.norm(now[n] - before[n]) > DISTURBED}
 
+    def result(self, name, before, steps, error=None):
+        """`error` is the distance left to the goal when the step limit ran out."""
+        moved = self.moved(before)
+        info = dict(steps=steps, moved=moved)
+        if error is not None:
+            return SkillResult(False, f"{name} failed: {error:.3f} m from the goal after {steps} steps", dict(info, error=round(float(error), 3)))
+        if moved:
+            return SkillResult(False, f"{name} failed: moved {sorted(moved)}", info)
+        return SkillResult(True, f"{name} done", info)
+
     def pick_move(self, name, goal, on_step=None, limit=MAX_STEPS):
         """Take `name` and hold it still with its centre at the world point `goal`."""
         self.select(name)
@@ -99,9 +110,8 @@ class RLSkills:
             self.act(self.pick_policy, goal, on_step)
             speed = np.linalg.norm(self.data.qvel[self.arm_v])
             if np.linalg.norm(self.centre() - goal) <= AT_GOAL and speed < STILL and self.grasped():
-                moved = self.moved(before)
-                return dict(success=not moved, steps=step + 1, moved=moved)
-        return dict(success=False, steps=limit, moved=self.moved(before), error=round(float(np.linalg.norm(self.centre() - goal)), 3))
+                return self.result(f"pick_move({name})", before, step + 1)
+        return self.result(f"pick_move({name})", before, limit, np.linalg.norm(self.centre() - goal))
 
     def place(self, xy, on_step=None, limit=MAX_STEPS):
         """Set the held object down at (x, y) on the console, let go and lift the hand."""
@@ -114,6 +124,5 @@ class RLSkills:
             above = self.data.site_xpos[self.scene.tcp][2] - self.centre()[2]
             still = np.linalg.norm(self.data.cvel[self.body]) < 0.1
             if released and gap > OPEN_GAP and above > HAND_ABOVE and still:
-                moved = self.moved(before)
-                return dict(success=not moved, steps=step + 1, moved=moved)
-        return dict(success=False, steps=limit, moved=self.moved(before), error=round(float(np.linalg.norm(self.centre() - goal)), 3))
+                return self.result("place", before, step + 1)
+        return self.result("place", before, limit, np.linalg.norm(self.centre() - goal))
