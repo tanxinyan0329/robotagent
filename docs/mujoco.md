@@ -8,7 +8,6 @@
 | `kitchen.py` | 加载住宅场景 |
 | `sim.py` | 仿真步进和渲染 |
 | `world.py` | 技能用的仿真接口 |
-| `rl_tasks.py`、`rl_skills.py` | 强化学习的任务和部署 |
 
 ## 机器人
 

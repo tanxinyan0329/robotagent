@@ -1,12 +1,12 @@
 # 传统方法操作技能：抓取、放置、开关抽屉和柜门
 
-代码在 `mobile_panda_sim/manipulation/`，不用训练：
+代码在 `mobile_panda_sim/skills/` 和 `mobile_panda_sim/manipulation/`，不用训练：
 
 | 文件 | 内容 |
 |---|---|
-| `pose.py` | 位姿运算，不依赖任何仿真器 |
-| `planner.py` | 运动规划层：基于 mplib 的逆运动学、避障路径（RRTConnect）、直线运动。障碍物是从场景碰撞体采样的点云；机械臂下面的立柱和底盘写进了规划用的机器人模型，算作自碰撞 |
-| `skills.py` | 技能层：`pick`、`place`、`open`、`close`、`home`，以及选底盘停靠位置的 `suggest_base_pose` |
+| `manipulation/pose.py` | 位姿运算，不依赖任何仿真器 |
+| `manipulation/planner.py` | 运动规划层：基于 mplib 的逆运动学、避障路径（RRTConnect）、直线运动。障碍物是从场景碰撞体采样的点云；机械臂下面的立柱和底盘写进了规划用的机器人模型，算作自碰撞 |
+| `skills/pick.py`、`place.py`、`articulate.py`、`base_pose.py`、`home.py` | 技能层，每个技能一个模块 |
 | `mj/world.py` | 技能需要的仿真接口：位姿、关节、步进、碰撞几何、射线、接触 |
 
 这些技能读取仿真里的真值（物体网格和位姿、把手位置、关节轴），是**参考实现**，不经过视觉。
@@ -15,23 +15,23 @@
 ## 用法
 
 ```python
-from mobile_panda_sim.manipulation.skills import ManipulationSkills
 from mobile_panda_sim.mj.sim import MujocoScene
-from mobile_panda_sim.mj.world import MujocoWorld
+from mobile_panda_sim.skills import SkillLibrary
 
 scene = MujocoScene("wheels")
-scene.reset((-2.95, -1.15, 3.1416))         # 底盘停靠位 (x, y, yaw)
-skills = ManipulationSkills(MujocoWorld(scene))
+skills = SkillLibrary(scene)
+skills.reset((-2.95, -1.15, 3.1416))        # 底盘停靠位 (x, y, yaw)
 
-r = skills.pick("lemon")                    # 从上方抓起，抬高 12 cm
-r = skills.place((-3.38, -1.42))            # 放到 (x, y) 下方的台面上，松开，抬手
-skills.home()                               # 回到收起姿态
+r = skills.run("pick", object="lemon")      # 从上方抓起，抬高 12 cm
+r = skills.run("place", target=(-3.38, -1.42))   # 放到 (x, y) 下方的台面上，松开，抬手
+skills.run("home")                          # 回到收起姿态
 print(r.success, r.message, r.info)         # SkillResult：成功与否、原因、细节
 
-pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")   # 底盘该停哪
-skills.open("kitchen_counter", "middle_slide_top")       # 抽屉默认拉出 0.25 m
-skills.close("kitchen_counter", "middle_slide_top")
-skills.open("fridge", "top_door_hinge")                  # 门默认开到 0.6 rad（约 35°），可传 target
+joint = dict(articulation="kitchen_counter", joint="middle_slide_top")
+r = skills.run("suggest_base_pose", **joint)   # 底盘该停哪：r.info["pose"]、r.info["coverage"]
+skills.run("open", **joint)                 # 抽屉默认拉出 0.25 m
+skills.run("close", **joint)
+skills.run("open", articulation="fridge", joint="top_door_hinge")   # 门默认开到 0.6 rad（约 35°），可传 target
 ```
 
 关节名就是 `/mobile_panda/state` 里 `articulations` 下的名字。
@@ -71,16 +71,16 @@ skills.open("fridge", "top_door_hinge")                  # 门默认开到 0.6 r
 
 ## 实测
 
-Ubuntu 22.04，MuJoCo 3.5.0，`demo_manipulation.py all` 跑 5 轮，轮式底盘 90/90，所有步骤都没有碰动其他物体；平面底盘 2 轮 36/36：
+Ubuntu 22.04，MuJoCo 3.5.0，`demo_manipulation.py all` 跑 8 轮，轮式底盘 144/144，所有步骤都没有碰动其他物体：
 
 | 任务 | 底盘位置 (x, y, yaw) | 结果 |
 |---|---|---|
-| 台柜中间上层抽屉：拉开 0.25 m、关上 | (-1.15, 1.83, 1.989) | 开 5/5，关 5/5 |
-| 台柜左侧上层抽屉：拉开、关上 | (-2.899, 1.86, 1.153) | 开 5/5，关 5/5 |
-| 玄关台：抓糖盒、梨、柠檬，各放到台面另一处 | (-2.95, -1.15, π) | 抓 15/15，放 15/15 |
-| 冰箱上门：开到 0.6 rad、关上 | (0.249, 1.492, 1.107) | 开 5/5，关 5/5 |
+| 台柜中间上层抽屉：拉开 0.25 m、关上 | (-1.15, 1.83, 1.989) | 开 8/8，关 8/8 |
+| 台柜左侧上层抽屉：拉开、关上 | (-2.899, 1.86, 1.153) | 开 8/8，关 8/8 |
+| 玄关台：抓糖盒、梨、柠檬，各放到台面另一处 | (-2.95, -1.15, π) | 抓 24/24，放 24/24 |
+| 冰箱上门：开到 0.6 rad、关上 | (0.249, 1.492, 1.107) | 开 8/8，关 8/8 |
 
-每项只有 5 轮，不代表长期成功率。
+圆的物体松手后可能滚动：测试里柠檬偶尔滚出 4 cm 的判定范围，`place` 会报告失败。
 
 失败时技能返回 `success=False` 并说明原因（够不着、没夹住、路径规划失败），不会卡住；`info["stages"]` 里有每次抓取的细节。
 
@@ -89,10 +89,10 @@ Ubuntu 22.04，MuJoCo 3.5.0，`demo_manipulation.py all` 跑 5 轮，轮式底�
 ## 选底盘停靠位置
 
 ```python
-pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")
+result = skills.run("suggest_base_pose", articulation="kitchen_counter", joint="middle_slide_top")
 ```
 
-默认同时评估**拉开**和**关回**，`coverage` 取两个方向里较差的那个，1.0 表示两个方向都够得着。`round_trip=False` 只评估拉开。关回的起点按实际会开到的位置算，也就是目标加上 2 cm 或 0.05 rad 的过冲。
+默认同时评估**拉开**和**关回**，`info["coverage"]` 取两个方向里较差的那个，1.0 表示两个方向都够得着。`round_trip=False` 只评估拉开。关回的起点按实际会开到的位置算，也就是目标加上 2 cm 或 0.05 rad 的过冲。
 
 可行的距离通常是一段范围。函数取这段范围的中间，不取最近的位置：最近的位置贴着极限，手臂挤在立柱旁边，估计能过，实际稍有偏差就失败。
 

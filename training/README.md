@@ -21,7 +21,7 @@
 
 ## 任务
 
-代码在 `mobile_panda_sim/mj/rl_tasks.py`，部署在 `mobile_panda_sim/mj/rl_skills.py`。
+任务在 `mobile_panda_sim/skills/learned/tasks.py`，部署在 `common.py`、`pick_move.py` 和 `place.py`。
 
 | 项目 | 内容 |
 |---|---|
@@ -65,4 +65,4 @@ Ubuntu 22.04，MuJoCo 3.5.0，RTX 5070 Ti Laptop，32 线程 CPU，一个训练�
 
 ## 换成自己的任务
 
-在 `rl_tasks.py` 里继承 `ConsoleTask`，写 `reset_one`（初始状态）和 `score`（奖励、成功、失败）。`train.py` 只用到 `reset`、`observe`、`step`。
+在 `tasks.py` 里继承 `ConsoleTask`，写 `reset_one`（初始状态）和 `score`（奖励、成功、失败）。`train.py` 只用到 `reset`、`observe`、`step`。部署时继承 `PolicySkill`，步骤和普通技能一样，见[新增一个技能](../skills/README.md#新增一个技能)。

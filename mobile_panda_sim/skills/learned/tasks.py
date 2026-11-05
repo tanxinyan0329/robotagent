@@ -12,9 +12,9 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 import mujoco  # noqa: E402
 import numpy as np  # noqa: E402
 
-from ..geometry import ARM_REST, GRIPPER_RANGE, MAX_JOINT_DELTA  # noqa: E402
-from .kitchen import KitchenScene  # noqa: E402
-from .model import ARM_JOINTS, CONTROL_SUBSTEPS, FINGER_JOINTS, build  # noqa: E402
+from ...geometry import ARM_REST, GRIPPER_RANGE, MAX_JOINT_DELTA  # noqa: E402
+from ...mj.kitchen import KitchenScene  # noqa: E402
+from ...mj.model import ARM_JOINTS, CONTROL_SUBSTEPS, FINGER_JOINTS, build  # noqa: E402
 
 OBS_SIZE, ACTION_SIZE = 45, 8
 MAX_STEPS = 60
@@ -67,7 +67,7 @@ def body_box(model, data, body):
 
 class ConsoleTask:
     def __init__(self, num_envs, seed=0, threads=None):
-        from .sim import MujocoScene
+        from ...mj.sim import MujocoScene
         scene = MujocoScene("planar", DOCK)
         self.rest_poses = {name: (position.copy(), quat.copy()) for name, (position, quat) in scene.settled.items()}
         scene.close()

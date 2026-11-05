@@ -3,91 +3,91 @@
   "description": "移动 Panda 技能库目录。local_skills 是可以在本机运行的技能；external_skills 是外部参考。",
   "local_skills": [
     {
-      "id": "classical_pick",
+      "id": "pick",
       "name": "从上方抓起物体",
       "kind": "classical",
-      "call": "ManipulationSkills(MujocoWorld(scene)).pick(name)",
-      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "skills.run(\"pick\", object=name)",
+      "code": "mobile_panda_sim/skills/pick.py",
       "demo": "scripts/demo_manipulation.py",
       "docs": "docs/manipulation.md",
-      "preconditions": "底盘停稳",
+      "preconditions": "底盘停稳；手里没有东西",
       "applies_to": "窄边小于 7.5 cm、放在够得着的台面上的物体，从上方抓",
       "not_for": "从侧面抓；抽屉和冰箱里的物品；台面靠墙一侧太远的物品",
       "validated": {
         "results": {
-          "sugar_box, pear, lemon": "15/15"
+          "sugar_box, pear, lemon": "24/24"
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
         "environment": "Ubuntu 22.04, MuJoCo 3.5.0, wheels base, 2026-11-05"
       }
     },
     {
-      "id": "classical_place",
+      "id": "place",
       "name": "把手中物体放到台面上",
       "kind": "classical",
-      "call": "ManipulationSkills(MujocoWorld(scene)).place((x, y), height=None)",
-      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "skills.run(\"place\", target=(x, y), height=None)",
+      "code": "mobile_panda_sim/skills/place.py",
       "demo": "scripts/demo_manipulation.py",
       "docs": "docs/manipulation.md",
       "preconditions": "手里握着物体，底盘停稳",
       "applies_to": "平整台面",
-      "not_for": "放进抽屉或冰箱；倾斜或很小的表面",
+      "not_for": "放进抽屉或冰箱；倾斜或很小的表面；圆的物体松手后可能滚动几厘米",
       "validated": {
         "results": {
-          "entry_console": "15/15"
+          "entry_console": "24/24"
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
         "environment": "Ubuntu 22.04, MuJoCo 3.5.0, wheels base, 2026-11-05"
       }
     },
     {
-      "id": "classical_open",
+      "id": "open",
       "name": "抓把手拉开抽屉或柜门",
       "kind": "classical",
-      "call": "ManipulationSkills(MujocoWorld(scene)).open(articulation, joint, target=None)",
-      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "skills.run(\"open\", articulation=name, joint=joint, target=None)",
+      "code": "mobile_panda_sim/skills/articulate.py",
       "demo": "scripts/demo_manipulation.py",
       "docs": "docs/manipulation.md",
-      "preconditions": "底盘停稳",
+      "preconditions": "底盘停稳；手里没有东西",
       "applies_to": "台柜上层左、中抽屉；冰箱上门到约 35°",
       "not_for": "把手低于约 0.55 m 的抽屉和柜门；冰箱下门；矮柜推拉门",
       "validated": {
         "results": {
-          "two drawers and fridge door": "15/15"
+          "two drawers and fridge door": "24/24"
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
         "environment": "Ubuntu 22.04, MuJoCo 3.5.0, wheels base, 2026-11-05"
       }
     },
     {
-      "id": "classical_close",
+      "id": "close",
       "name": "抓把手关上抽屉或柜门",
       "kind": "classical",
-      "call": "ManipulationSkills(MujocoWorld(scene)).close(articulation, joint)",
-      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "skills.run(\"close\", articulation=name, joint=joint)",
+      "code": "mobile_panda_sim/skills/articulate.py",
       "demo": "scripts/demo_manipulation.py",
       "docs": "docs/manipulation.md",
-      "preconditions": "底盘停稳",
+      "preconditions": "底盘停稳；手里没有东西",
       "applies_to": "台柜上层左、中抽屉；冰箱上门从约 35° 关上",
       "not_for": "把手低于约 0.55 m 的抽屉和柜门；从 70° 关冰箱门",
       "validated": {
         "results": {
-          "two drawers and fridge door": "15/15"
+          "two drawers and fridge door": "24/24"
         },
         "criterion": "技能返回成功，且没有碰动其他物体超过 2 cm",
         "environment": "Ubuntu 22.04, MuJoCo 3.5.0, wheels base, 2026-11-05"
       }
     },
     {
-      "id": "classical_home",
+      "id": "home",
       "name": "手臂回到收起姿态",
       "kind": "classical",
-      "call": "ManipulationSkills(MujocoWorld(scene)).home()",
-      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "skills.run(\"home\")",
+      "code": "mobile_panda_sim/skills/home.py",
       "demo": "scripts/demo_manipulation.py",
       "docs": "docs/manipulation.md",
       "preconditions": "底盘停稳",
-      "applies_to": "任何位置，沿无碰撞路径回收",
+      "applies_to": "任何位置，沿无碰撞路径回收手臂",
       "not_for": "手臂被卡住时",
       "validated": {
         "results": {
@@ -98,11 +98,11 @@
       }
     },
     {
-      "id": "classical_suggest_base_pose",
+      "id": "suggest_base_pose",
       "name": "选开关都够得着的底盘停靠位",
       "kind": "classical",
-      "call": "ManipulationSkills(MujocoWorld(scene)).suggest_base_pose(articulation, joint, target=None, round_trip=True)",
-      "code": "mobile_panda_sim/manipulation/skills.py",
+      "call": "skills.run(\"suggest_base_pose\", articulation=name, joint=joint, target=None, round_trip=True)",
+      "code": "mobile_panda_sim/skills/base_pose.py",
       "demo": "scripts/demo_manipulation.py",
       "docs": "docs/manipulation.md",
       "preconditions": "无",
@@ -120,8 +120,8 @@
       "id": "rl_pick_move",
       "name": "拿起物体并移到指定位置",
       "kind": "rl",
-      "call": "RLSkills(scene).pick_move(name, goal)",
-      "code": "mobile_panda_sim/mj/rl_skills.py",
+      "call": "skills.run(\"rl_pick_move\", object=name, goal=(x, y, z))",
+      "code": "mobile_panda_sim/skills/learned/pick_move.py",
       "demo": "scripts/demo_rl_skills.py",
       "docs": "training/README.md",
       "checkpoint": "skills/policies/pick_move.pt",
@@ -142,13 +142,13 @@
       "id": "rl_place",
       "name": "把手中物体放到指定位置",
       "kind": "rl",
-      "call": "RLSkills(scene).place(xy)",
-      "code": "mobile_panda_sim/mj/rl_skills.py",
+      "call": "skills.run(\"rl_place\", target=(x, y))",
+      "code": "mobile_panda_sim/skills/learned/place.py",
       "demo": "scripts/demo_rl_skills.py",
       "docs": "training/README.md",
       "checkpoint": "skills/policies/place.pt",
       "training": "training/train.py",
-      "preconditions": "底盘停在 DOCK；物体在玄关台工作区内",
+      "preconditions": "手里握着物体（来自 rl_pick_move），底盘停在 DOCK",
       "applies_to": "手中的柠檬、梨、汤罐，放到玄关台工作区内",
       "not_for": "其他物体和其他台面",
       "validated": {

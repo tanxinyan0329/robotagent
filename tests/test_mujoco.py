@@ -13,7 +13,6 @@ import pytest
 from mobile_panda_sim.geometry import ARM_REST
 from mobile_panda_sim.mj.model import ARM_JOINTS
 from mobile_panda_sim.mj.sim import MujocoScene
-from mobile_panda_sim.mj.world import MujocoWorld
 from mobile_panda_sim.paths import REPO, ros_urdf
 
 REST_TCP = {"wheels": (-2.55, -1.335, 1.0964), "planar": (-2.55, -1.335, 1.0894)}
@@ -170,22 +169,17 @@ def test_worker_state():
 
 
 @pytest.fixture(scope="module")
-def skills_on():
+def library():
     pytest.importorskip("mplib")
-    from mobile_panda_sim.manipulation.skills import ManipulationSkills
+    from mobile_panda_sim.skills import SkillLibrary
     scene = MujocoScene("wheels")
-    world = MujocoWorld(scene)
-
-    def park(start):
-        scene.reset(start)
-        return ManipulationSkills(world)
-    yield park, world
+    yield SkillLibrary(scene)
     scene.close()
 
 
-def test_world_reads_the_scene(skills_on):
-    park, world = skills_on
-    park((-2.95, -1.15, 3.1416))
+def test_world_reads_the_scene(library):
+    library.reset((-2.95, -1.15, 3.1416))
+    world = library.context.world
     assert world.surface(-3.40, -1.25) == pytest.approx(0.918, abs=0.01)
     assert world.object_points("sugar_box")[:, 2].max() > 1.05
     assert world.joint_info("fridge", "top_door_hinge")["kind"] == "revolute"
@@ -195,36 +189,54 @@ def test_world_reads_the_scene(skills_on):
     assert pose.to_transformation_matrix()[:3, 2] @ [0, -1, 0] > 0.99
 
 
-def test_pick_and_place_skill(skills_on):
-    park, world = skills_on
-    skills = park((-2.95, -1.15, 3.1416))
-    assert skills.pick("lemon").success
-    assert skills.place((-3.38, -1.42)).success
-    assert np.linalg.norm(world.object_position("lemon")[:2] - [-3.38, -1.42]) < 0.04
+def test_library_lists_every_skill_with_its_scope(library):
+    listed = library.list()
+    assert set(listed) == {"pick", "place", "open", "close", "home", "suggest_base_pose", "rl_pick_move", "rl_place"}
+    catalog = json.loads((REPO / "skills/catalog.json").read_text(encoding="utf-8"))["local_skills"]
+    for entry in catalog:
+        assert listed[entry["id"]] == {key: entry[key] for key in ("applies_to", "not_for", "preconditions")}, entry["id"]
+    with pytest.raises(KeyError):
+        library.run("fly")
 
 
-def test_drawer_skill(skills_on):
-    park, world = skills_on
-    skills = park((-1.15, 1.83, 1.989))
-    assert skills.open("kitchen_counter", "middle_slide_top").success
-    assert world.joint_position("kitchen_counter", "middle_slide_top") > 0.2
-    assert skills.close("kitchen_counter", "middle_slide_top").success
-    assert abs(world.joint_position("kitchen_counter", "middle_slide_top")) < 0.03
+def test_skills_refuse_without_their_preconditions(library):
+    library.reset((-2.95, -1.15, 3.1416))
+    assert not library.run("place", target=(-3.38, -1.42))
+    assert not library.run("rl_place", target=(-3.38, -1.42))
+    assert "not holding" in library.run("place", target=(-3.38, -1.42)).message
 
 
-def test_suggested_base_pose_opens_and_closes(skills_on):
-    park, world = skills_on
-    skills = park((-2.55, -1.95, 1.5708))
-    pose, coverage = skills.suggest_base_pose("kitchen_counter", "middle_slide_top")
-    assert coverage > 0.99
-    skills = park(pose)
-    assert skills.open("kitchen_counter", "middle_slide_top").success
-    assert skills.close("kitchen_counter", "middle_slide_top").success
+def test_pick_and_place_skill(library):
+    library.reset((-2.95, -1.15, 3.1416))
+    assert library.run("pick", object="pear")
+    assert library.context.held == "pear"
+    assert library.run("place", target=(-3.40, -1.00))
+    assert library.context.held is None
+    assert np.linalg.norm(library.context.world.object_position("pear")[:2] - [-3.40, -1.00]) < 0.04
+
+
+def test_drawer_skill(library):
+    joint = dict(articulation="kitchen_counter", joint="middle_slide_top")
+    library.reset((-1.15, 1.83, 1.989))
+    assert library.run("open", **joint)
+    assert library.context.world.joint_position(**joint) > 0.2
+    assert library.run("close", **joint)
+    assert abs(library.context.world.joint_position(**joint)) < 0.03
+
+
+def test_suggested_base_pose_opens_and_closes(library):
+    joint = dict(articulation="kitchen_counter", joint="middle_slide_top")
+    library.reset((-2.55, -1.95, 1.5708))
+    result = library.run("suggest_base_pose", **joint)
+    assert result.info["coverage"] > 0.99
+    library.reset(result.info["pose"])
+    assert library.run("open", **joint)
+    assert library.run("close", **joint)
 
 
 def test_policy_observation_matches_training():
-    from mobile_panda_sim.mj.rl_skills import RLSkills
-    from mobile_panda_sim.mj.rl_tasks import DOCK, PickMoveTask
+    from mobile_panda_sim.skills import SkillLibrary
+    from mobile_panda_sim.skills.learned.tasks import DOCK, PickMoveTask
     task = PickMoveTask(1, seed=3, threads=1)
     expected = task.observe()[0]
     data = task.datas[0]
@@ -235,16 +247,16 @@ def test_policy_observation_matches_training():
         scene.data.qpos[target:target + 7] = data.qpos[address:address + 7]
     scene.data.qpos[scene.arm_q] = data.qpos[task.arm_q]
     mujoco.mj_forward(scene.model, scene.data)
-    skills = RLSkills(scene)
-    skills.select(task.target[0])
-    observed = skills.observation(task.goal[0])
+    skill = SkillLibrary(scene).skills["rl_pick_move"]
+    skill.select(task.target[0])
+    observed = skill.observation(task.goal[0])
     assert np.allclose(observed, expected, atol=1e-3), np.abs(observed - expected).argmax()
     scene.close()
     task.close()
 
 
 def test_task_resets_and_rewards():
-    from mobile_panda_sim.mj.rl_tasks import ACTION_SIZE, MAX_STEPS, OBS_SIZE, PickMoveTask
+    from mobile_panda_sim.skills.learned.tasks import ACTION_SIZE, MAX_STEPS, OBS_SIZE, PickMoveTask
     task = PickMoveTask(4, seed=0, threads=1)
     obs = task.reset()
     assert obs.shape == (4, OBS_SIZE) and np.isfinite(obs).all()
@@ -256,7 +268,7 @@ def test_task_resets_and_rewards():
 
 
 def test_closed_fingers_on_top_do_not_count_as_a_grasp():
-    from mobile_panda_sim.mj.rl_tasks import MIN_FINGER_GAP, PickMoveTask, is_grasped
+    from mobile_panda_sim.skills.learned.tasks import MIN_FINGER_GAP, PickMoveTask, is_grasped
     task = PickMoveTask(1, seed=0, threads=1)
     data = task.datas[0]
     data.qpos[task.finger_q] = 0.0
@@ -266,7 +278,7 @@ def test_closed_fingers_on_top_do_not_count_as_a_grasp():
 
 
 def test_moving_a_neighbour_fails_the_episode():
-    from mobile_panda_sim.mj.rl_tasks import ACTION_SIZE, PickMoveTask
+    from mobile_panda_sim.skills.learned.tasks import ACTION_SIZE, PickMoveTask
     task = PickMoveTask(2, seed=0, threads=1)
     data = task.datas[0]
     address = task.addresses["cracker_box"]
@@ -278,11 +290,11 @@ def test_moving_a_neighbour_fails_the_episode():
 
 
 def test_trained_policies_run_on_the_robot():
-    from mobile_panda_sim.mj.rl_skills import RLSkills
-    from mobile_panda_sim.mj.rl_tasks import DOCK, TABLE_Z
+    from mobile_panda_sim.skills import SkillLibrary
+    from mobile_panda_sim.skills.learned.tasks import DOCK, TABLE_Z
     scene = MujocoScene("planar", DOCK)
-    scene.reset()
-    skills = RLSkills(scene)
-    assert skills.pick_move("lemon", np.array([-3.40, -1.50, TABLE_Z + 0.15])).success
-    assert skills.place((-3.34, -1.56)).success
+    skills = SkillLibrary(scene)
+    skills.reset()
+    assert skills.run("rl_pick_move", object="lemon", goal=[-3.40, -1.50, TABLE_Z + 0.15])
+    assert skills.run("rl_place", target=(-3.34, -1.56))
     scene.close()

@@ -14,9 +14,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mobile_panda_sim.geometry import ARM_REST  # noqa: E402
-from mobile_panda_sim.mj.rl_skills import RLSkills  # noqa: E402
-from mobile_panda_sim.mj.rl_tasks import CLEARANCE, DOCK, NEIGHBOURS, TABLE_Z, TARGETS, ZONE_X, ZONE_Y  # noqa: E402
 from mobile_panda_sim.mj.sim import MujocoScene  # noqa: E402
+from mobile_panda_sim.skills import SkillLibrary  # noqa: E402
+from mobile_panda_sim.skills.learned.tasks import CLEARANCE, DOCK, NEIGHBOURS, TABLE_Z, TARGETS, ZONE_X, ZONE_Y  # noqa: E402
 
 HOLD_HEIGHT = 0.15
 
@@ -74,24 +74,21 @@ def main():
     p.add_argument("--report", type=Path)
     args = p.parse_args()
     scene = MujocoScene(args.base, viewer=not args.no_viewer)
-    skills = RLSkills(scene)
-    rng = np.random.default_rng(args.seed)
     on_step = (lambda: time.sleep(scene.control_timestep)) if not args.no_viewer else (lambda: None)
+    skills = SkillLibrary(scene, on_step=on_step)
+    rng = np.random.default_rng(args.seed)
     results = []
     for episode in range(args.episodes):
         name = args.object or TARGETS[episode % len(TARGETS)]
-        scene.reset()
+        skills.reset()
         address = scene.model.joint(name).qposadr[0]
         scene.data.qpos[address:address + 2] = free_spot(rng, scene, name)
         drive_to(scene, DOCK[:2], DOCK[2], on_step)
-        skills.select(name)
-        centre = skills.centre()
         spot = free_spot(rng, scene, name)
-        goal = np.array([spot[0], spot[1], TABLE_Z + HOLD_HEIGHT])
-        pick = skills.pick_move(name, goal, on_step)
-        place = skills.place(free_spot(rng, scene, name), on_step) if pick else None
-        record = dict(episode=episode, object=name, start=centre.round(3).tolist(), base=base_pose(scene).round(3).tolist(),
-                      pick_move=vars(pick), place=vars(place) if place else None)
+        goal = [spot[0], spot[1], TABLE_Z + HOLD_HEIGHT]
+        pick = skills.run("rl_pick_move", object=name, goal=goal)
+        place = skills.run("rl_place", target=free_spot(rng, scene, name)) if pick else None
+        record = dict(episode=episode, object=name, base=base_pose(scene).round(3).tolist(), pick_move=vars(pick), place=vars(place) if place else None)
         results.append(record)
         print(json.dumps(record), flush=True)
     picks = sum(r["pick_move"]["success"] for r in results)

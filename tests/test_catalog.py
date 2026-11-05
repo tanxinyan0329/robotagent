@@ -1,17 +1,10 @@
 """skills/catalog.json matches the code and the files it names."""
-import ast
 import json
-import re
 
 from mobile_panda_sim.paths import REPO
 
 SKILLS = json.loads((REPO / "skills/catalog.json").read_text(encoding="utf-8"))["local_skills"]
 REQUIRED = {"id", "name", "kind", "call", "code", "demo", "docs", "preconditions", "applies_to", "not_for", "validated"}
-
-
-def methods(path):
-    tree = ast.parse((REPO / path).read_text(encoding="utf-8"))
-    return {node.name for cls in ast.walk(tree) if isinstance(cls, ast.ClassDef) for node in cls.body if isinstance(node, ast.FunctionDef)}
 
 
 def test_every_entry_is_complete():
@@ -29,13 +22,15 @@ def test_named_files_exist():
                 assert (REPO / skill[key]).is_file(), (skill["id"], key)
 
 
-def test_calls_name_real_methods():
+def test_each_entry_names_a_skill_in_its_module():
     for skill in SKILLS:
-        method = re.findall(r"\.(\w+)\(", skill["call"])[-1]
-        assert method in methods(skill["code"]), skill["id"]
+        assert f'name = "{skill["id"]}"' in (REPO / skill["code"]).read_text(encoding="utf-8"), skill["id"]
+        assert f'skills.run("{skill["id"]}"' in skill["call"], skill["id"]
 
 
-def test_public_skills_are_listed():
-    listed = " ".join(s["call"] for s in SKILLS)
-    for name in ("pick", "place", "open", "close", "home", "suggest_base_pose", "pick_move"):
-        assert f".{name}(" in listed, name
+def test_every_skill_module_is_listed():
+    listed = {skill["code"] for skill in SKILLS}
+    folder = REPO / "mobile_panda_sim/skills"
+    for path in [*folder.glob("*.py"), *(folder / "learned").glob("*.py")]:
+        if "\n@register\n" in path.read_text(encoding="utf-8"):
+            assert path.relative_to(REPO).as_posix() in listed, path.name

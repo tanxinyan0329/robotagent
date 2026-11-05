@@ -19,9 +19,8 @@ import time
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from mobile_panda_sim.manipulation.skills import ManipulationSkills  # noqa: E402
 from mobile_panda_sim.mj.sim import MujocoScene  # noqa: E402
-from mobile_panda_sim.mj.world import MujocoWorld  # noqa: E402
+from mobile_panda_sim.skills import SkillLibrary  # noqa: E402
 
 SCENARIOS = {
     "drawer": [
@@ -46,42 +45,48 @@ class WindowClosed(Exception):
 
 class Run:
     def __init__(self, args):
+        self.args = args
         self.scene = MujocoScene(args.base, viewer=args.viewer)
-        self.world = MujocoWorld(self.scene)
+        self.frames, self.recording = [], False
+        self.skills = SkillLibrary(self.scene, on_step=self.on_step, on_idle=self.show if self.scene.viewer else None)
 
-    def skills(self, start, on_step):
-        self.scene.reset(start)
-        return ManipulationSkills(self.world, on_step=on_step, on_idle=self.show if self.scene.viewer else None)
+    def on_step(self):
+        self.show()
+        if self.recording and self.skills.context.steps % 2 == 0:
+            self.frames.append(self.scene.capture_rgb()["base_camera"])
 
     def show(self):
         if self.scene.viewer is not None and not self.scene.viewer.is_running():
             raise WindowClosed
 
-    def frame(self):
-        return self.scene.capture_rgb()["base_camera"]
-
     def close(self):
         self.scene.close()
 
 
-def run(sim, start, steps, args, record=None):
-    """One scenario: park the robot at `start` (reset), run the skill steps."""
-    frames = []
+def call(skills, step):
+    name, *params = step
+    if name == "pick":
+        return skills.run("pick", object=params[0])
+    if name == "place":
+        return skills.run("place", target=params)
+    if name in ("open", "close"):
+        return skills.run(name, articulation=params[0], joint=params[1])
+    return skills.run(name)
 
-    def on_step():
-        if args.viewer:
-            sim.show()
-        elif record is not None and skills.steps % 2 == 0:
-            frames.append(sim.frame())
-    skills = sim.skills(start, on_step)
-    world = skills.world
+
+def run(sim, start, steps, record=None):
+    """One scenario: park the robot at `start` (reset), run the skill steps."""
+    skills = sim.skills
+    skills.reset(start)
+    sim.frames, sim.recording = [], record is not None
+    world = skills.context.world
     results, target = [], None
     for step in steps:
         name, *params = step
         before = world.object_positions()
         target = params[0] if name == "pick" else target
         t = time.time()
-        result = skills.place(params) if name == "place" else getattr(skills, name)(*params)
+        result = call(skills, step)
         after = world.object_positions()
         moved = {n: round(float(np.linalg.norm(after[n] - before[n])), 3) for n in after
                  if n not in SETTLING and n != target and np.linalg.norm(after[n] - before[n]) > 0.02}
@@ -89,10 +94,10 @@ def run(sim, start, steps, args, record=None):
                        disturbed=moved, seconds=round(time.time() - t, 1), info=result.info)
         results.append(record_)
         print(json.dumps({k: v for k, v in record_.items() if k != "info"}), flush=True)
-    if record is not None and frames:
+    if record is not None and sim.frames:
         import imageio
         Path(record).parent.mkdir(parents=True, exist_ok=True)
-        imageio.mimsave(str(record), frames, fps=20)
+        imageio.mimsave(str(record), sim.frames, fps=20)
     return results
 
 
@@ -112,7 +117,7 @@ def main():
         for name in names:
             for start, steps in SCENARIOS[name]:
                 for i in range(args.repeat):
-                    results = run(sim, start, steps, args, record=args.record if first else None)
+                    results = run(sim, start, steps, record=args.record if first else None)
                     first = False
                     ok = all(r["success"] and not r["disturbed"] for r in results)
                     report.append(dict(scenario=name, start=start, run=i, ok=ok, steps=results))
